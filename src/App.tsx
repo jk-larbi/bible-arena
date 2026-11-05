@@ -18,6 +18,7 @@ import { ChampionshipView } from './components/championship/ChampionshipView';
 import { InteractiveGameHub } from './components/game-modes/InteractiveGameHub';
 import { mockQuizzes } from './data/mockQuizzes';
 import type { Quiz } from './types/bibleArena';
+import type { MultiplayerMatchConfig, MultiplayerParticipant } from './types/multiplayerGame';
 
 export function BibleArenaApp() {
   const { customQuizzes, showToast } = useAuth();
@@ -25,6 +26,10 @@ export function BibleArenaApp() {
   const [currentPage, setCurrentPage] = useState<AppPage>('home');
   const [activeQuizId, setActiveQuizId] = useState<string | null>(null);
   const [liveArenaPin, setLiveArenaPin] = useState<string>('');
+  const [activeMultiplayerSession, setActiveMultiplayerSession] = useState<{
+    session: MultiplayerMatchConfig;
+    participant: MultiplayerParticipant;
+  } | null>(null);
   const [isLiveArenaQuizActive, setIsLiveArenaQuizActive] = useState(false);
   const [isInteractiveGameActive, setIsInteractiveGameActive] = useState(false);
   const [isMusicModalOpen, setIsMusicModalOpen] = useState(false);
@@ -59,9 +64,14 @@ export function BibleArenaApp() {
       const searchParams = new URLSearchParams(window.location.search);
       const queryParams = new URLSearchParams(query || '');
       const pinParam = queryParams.get('pin') || searchParams.get('pin');
+      const gameParam = queryParams.get('game') || searchParams.get('game');
       if (pinParam && /^\d{6}$/.test(pinParam)) {
         setLiveArenaPin(pinParam);
-        setCurrentPage('join-arena');
+        if (gameParam) {
+          setCurrentPage('game-modes');
+        } else {
+          setCurrentPage('join-arena');
+        }
         setActiveQuizId(null);
         return;
       }
@@ -183,6 +193,12 @@ export function BibleArenaApp() {
               <InteractiveGameHub
                 onBackToHome={() => handleNavigate('home')}
                 onGameplayStateChange={setIsInteractiveGameActive}
+                initialMultiplayerSession={activeMultiplayerSession}
+                initialGamePin={liveArenaPin}
+                onClearInitialSession={() => {
+                  setActiveMultiplayerSession(null);
+                  setLiveArenaPin('');
+                }}
               />
             )}
 
@@ -192,6 +208,13 @@ export function BibleArenaApp() {
                 onNavigateQuizzes={() => handleNavigate('explore')}
                 onNavigateHome={() => handleNavigate('home')}
                 onGameplayStateChange={setIsLiveArenaQuizActive}
+                onJoinGameMode={(session, participant) => {
+                  setActiveMultiplayerSession({ session, participant });
+                  setCurrentPage('game-modes');
+                  window.location.hash = `game-modes?pin=${session.pin}`;
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                  showToast(`🎮 Joined ${session.gameTitle} match!`);
+                }}
               />
             )}
 

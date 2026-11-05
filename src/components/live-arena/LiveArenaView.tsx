@@ -10,6 +10,8 @@ import { QRScannerModal } from '../ui/QRScannerModal';
 import { AvatarDisplay } from '../ui/AvatarDisplay';
 import { avatars } from '../../data/avatars.tsx';
 import { gameService, shareCompetition, getShareInvitationInfo } from '../../services/gameService';
+import { multiplayerGameService } from '../../services/multiplayerGameService';
+import type { MultiplayerMatchConfig, MultiplayerParticipant } from '../../types/multiplayerGame';
 import {
   Radio,
   BookOpen,
@@ -38,6 +40,7 @@ interface LiveArenaViewProps {
   onNavigateQuizzes: () => void;
   onNavigateHome: () => void;
   onGameplayStateChange?: (isActive: boolean) => void;
+  onJoinGameMode?: (session: MultiplayerMatchConfig, participant: MultiplayerParticipant) => void;
 }
 
 type LiveStage = 'join' | 'waiting' | 'quiz' | 'results';
@@ -59,11 +62,13 @@ export const LiveArenaView: React.FC<LiveArenaViewProps> = ({
   onNavigateQuizzes,
   onNavigateHome,
   onGameplayStateChange,
+  onJoinGameMode,
 }) => {
   const { currentUser, showToast } = useAuth();
 
   // Navigation stage: Always start in 'join' to collect nickname/avatar even with initialPin
   const [stage, setStage] = useState<LiveStage>('join');
+  const [autoAdvanceCountdown, setAutoAdvanceCountdown] = useState<number | null>(null);
 
   // Notify parent layout of active gameplay to hide bottom navigation
   useEffect(() => {
@@ -92,6 +97,13 @@ export const LiveArenaView: React.FC<LiveArenaViewProps> = ({
   const [selectedAvatar, setSelectedAvatar] = useState(currentUser.avatar || 'hero-david');
   const [joinErrors, setJoinErrors] = useState<{ pin?: string; nickname?: string }>({});
   const [copiedPin, setCopiedPin] = useState(false);
+  const [activeLiveRooms, setActiveLiveRooms] = useState<Array<{ session: MultiplayerMatchConfig; participants: MultiplayerParticipant[] }>>([]);
+
+  useEffect(() => {
+    try {
+      setActiveLiveRooms(multiplayerGameService.getActiveRooms());
+    } catch {}
+  }, []);
 
   useEffect(() => {
     if (currentUser.avatar) {
@@ -262,6 +274,31 @@ export const LiveArenaView: React.FC<LiveArenaViewProps> = ({
     });
   };
 
+  // Automatic question advance when answer is submitted or time expires
+  useEffect(() => {
+    if (stage !== 'quiz' || !isAnswerSubmitted) {
+      setAutoAdvanceCountdown(null);
+      return;
+    }
+
+    const DURATION_MS = 2500;
+    const start = Date.now();
+    setAutoAdvanceCountdown(Math.ceil(DURATION_MS / 1000));
+
+    const interval = setInterval(() => {
+      const elapsed = Date.now() - start;
+      const rem = Math.max(0, Math.ceil((DURATION_MS - elapsed) / 1000));
+      setAutoAdvanceCountdown(rem);
+
+      if (elapsed >= DURATION_MS) {
+        clearInterval(interval);
+        handleNextQuestion();
+      }
+    }, 200);
+
+    return () => clearInterval(interval);
+  }, [stage, isAnswerSubmitted, currentQIndex]);
+
   // Join Game Form Submit
   const handleJoinSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -297,6 +334,17 @@ export const LiveArenaView: React.FC<LiveArenaViewProps> = ({
         nickname: cleanNickname,
         avatar: selectedAvatar,
       });
+
+      // If this session is for an interactive game mode, route to the Interactive Game Hub!
+      if (result.isGameMode) {
+        const mpSession = multiplayerGameService.getSessionByPin(cleanPin);
+        const parts = multiplayerGameService.getParticipants(cleanPin);
+        const myPart = parts.find((p) => p.id === result.participantId) || parts[0];
+        if (mpSession && onJoinGameMode) {
+          onJoinGameMode(mpSession, myPart);
+          return;
+        }
+      }
 
       setSessionId(result.sessionId);
       setParticipantId(result.participantId);
@@ -574,6 +622,58 @@ export const LiveArenaView: React.FC<LiveArenaViewProps> = ({
                   <span className="text-emerald-700 font-bold bg-emerald-50 px-2 py-0.5 rounded-md">
                     {sessionPreview.status === 'lobby' ? 'Lobby Open' : 'Session Active'}
                   </span>
+                </div>
+              </div>
+            )}
+
+            {/* Active Live Rooms (Quick Join) */}
+            {activeLiveRooms.length > 0 && !sessionPreview && (
+              <div className="space-y-2.5 pb-4 border-b border-slate-100">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black uppercase tracking-wider text-[#7C3AED] flex items-center gap-1.5 font-outfit">
+                    <Radio className="w-3.5 h-3.5 text-red-500 animate-pulse" />
+                    Live Players & Matches Happening Now
+                  </span>
+                  <span className="text-[11px] text-[#64748B] font-bold">
+                    Tap to Join Live
+                  </span>
+                </div>
+                <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                  {activeLiveRooms.map(({ session: rSess, participants: rParts }) => (
+                    <button
+                      key={rSess.pin}
+                      type="button"
+                      onClick={() => {
+                        setPin(rSess.pin);
+                        setJoinErrors({});
+                      }}
+                      className={`w-full text-left p-3 rounded-2xl border transition-all flex items-center justify-between cursor-pointer ${
+                        pin === rSess.pin
+                          ? 'bg-purple-50 border-[#7C3AED] ring-2 ring-purple-200'
+                          : 'bg-[#F8FAFC] hover:bg-purple-50/50 border-[#CBD5E1]'
+                      }`}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-black text-[#0F172A] truncate font-outfit">
+                            {rSess.gameTitle}
+                          </span>
+                          <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-purple-100 text-[#7C3AED]">
+                            Level {rSess.levelNumber}
+                          </span>
+                        </div>
+                        <p className="text-xs text-[#64748B] truncate mt-0.5">
+                          Host: <strong className="text-slate-800">{rSess.hostName}</strong> • Room PIN: <strong className="text-[#7C3AED]">{rSess.pin}</strong>
+                        </p>
+                      </div>
+                      <div className="shrink-0 flex items-center gap-2 ml-3">
+                        <span className="text-xs font-black px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-800 flex items-center gap-1.5">
+                          <Users className="w-3 h-3 text-emerald-600" />
+                          {rParts.length} {rSess.status === 'active' ? 'live' : 'joined'}
+                        </span>
+                      </div>
+                    </button>
+                  ))}
                 </div>
               </div>
             )}
@@ -1042,15 +1142,14 @@ export const LiveArenaView: React.FC<LiveArenaViewProps> = ({
                       </div>
                     </div>
 
-                    <Button
-                      variant="gold"
-                      size="md"
-                      onClick={handleNextQuestion}
-                      rightIcon={<ArrowRight className="w-4 h-4" />}
-                      className="font-bold shrink-0 shadow-sm"
-                    >
-                      {currentQIndex < quizQuestions.length - 1 ? 'Next Question' : 'View Final Results'}
-                    </Button>
+                    <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-50 border border-amber-200 text-[#D97706] font-outfit text-xs font-black shadow-xs shrink-0 animate-pulse">
+                      <span>⚡</span>
+                      <span>
+                        {currentQIndex < quizQuestions.length - 1
+                          ? `Next Question in ${autoAdvanceCountdown ?? 2}s...`
+                          : 'Finalizing Arena Results...'}
+                      </span>
+                    </div>
                   </div>
 
                   {/* Granular Points Breakdown */}

@@ -177,6 +177,8 @@ class MultiplayerGameService {
 
     const participantId = params.userId || this.getGuestIdentity().id;
     const existingList = this.getParticipants(cleanPin);
+    const isLive = session.status === 'active';
+    const currentQ = session.currentQuestionIndex || 0;
     
     // Prevent duplicate entries for the same participant ID or identical nickname
     let participant = existingList.find((p) => p.id === participantId || p.nickname.toLowerCase() === params.nickname.trim().toLowerCase());
@@ -184,7 +186,10 @@ class MultiplayerGameService {
     if (participant) {
       participant.nickname = params.nickname.trim();
       participant.avatar = params.avatar;
-      participant.status = 'ready';
+      participant.status = isLive ? 'playing' : 'ready';
+      if (isLive && participant.currentChallengeIndex < currentQ) {
+        participant.currentChallengeIndex = currentQ;
+      }
     } else {
       participant = {
         id: participantId,
@@ -194,18 +199,19 @@ class MultiplayerGameService {
         score: 0,
         accuracy: 0,
         streak: 0,
-        currentChallengeIndex: 0,
-        challengesCompleted: 0,
+        currentChallengeIndex: isLive ? currentQ : 0,
+        challengesCompleted: isLive ? currentQ : 0,
         totalTimeMs: 0,
         rank: existingList.length + 1,
         isHost: participantId === session.hostId,
         isReady: true,
-        status: 'ready',
+        status: isLive ? 'playing' : 'ready',
       };
       existingList.push(participant);
     }
 
     this.saveParticipants(cleanPin, existingList);
+    this.broadcastEvent(cleanPin, { type: 'PARTICIPANTS_UPDATE', participants: existingList });
     this.broadcastEvent(cleanPin, { type: 'PARTICIPANT_JOINED', participant });
 
     return { session, participant };
@@ -220,38 +226,72 @@ class MultiplayerGameService {
       onSessionUpdate?: (session: MultiplayerMatchConfig) => void;
       onParticipantsUpdate?: (participants: MultiplayerParticipant[]) => void;
       onGameStart?: (session: MultiplayerMatchConfig) => void;
+      onRoundStart?: (payload: { questionIndex: number; phaseEndTime: number; timeLimitSeconds: number }) => void;
+      onRoundReveal?: (payload: { questionIndex: number; phaseEndTime: number; answerData?: any }) => void;
       onGameFinished?: (result: MultiplayerMatchResult) => void;
     }
   ): () => void {
     const cleanPin = pin.trim().replace(/\D/g, '');
+
+    const handleIncomingMessage = (msg: any) => {
+      if (!msg) return;
+
+      if (msg.type === 'SESSION_UPDATE' && callbacks.onSessionUpdate) {
+        callbacks.onSessionUpdate(msg.session);
+      } else if (msg.type === 'PARTICIPANTS_UPDATE' && callbacks.onParticipantsUpdate) {
+        callbacks.onParticipantsUpdate(msg.participants);
+      } else if (msg.type === 'GAME_STARTED' && callbacks.onGameStart) {
+        callbacks.onGameStart(msg.session);
+      } else if (msg.type === 'ROUND_START' && callbacks.onRoundStart) {
+        callbacks.onRoundStart({
+          questionIndex: msg.questionIndex,
+          phaseEndTime: msg.phaseEndTime,
+          timeLimitSeconds: msg.timeLimitSeconds,
+        });
+      } else if (msg.type === 'ROUND_REVEAL' && callbacks.onRoundReveal) {
+        callbacks.onRoundReveal({
+          questionIndex: msg.questionIndex,
+          phaseEndTime: msg.phaseEndTime,
+          answerData: msg.answerData,
+        });
+      } else if (msg.type === 'GAME_FINISHED' && callbacks.onGameFinished) {
+        callbacks.onGameFinished(msg.result);
+      } else if (msg.type === 'PARTICIPANT_JOINED') {
+        const list = this.getParticipants(cleanPin);
+        if (callbacks.onParticipantsUpdate) callbacks.onParticipantsUpdate(list);
+      }
+    };
 
     // 1. Cross-tab/window synchronization via BroadcastChannel
     let channel: BroadcastChannel | null = null;
     try {
       channel = new BroadcastChannel(`biblearena_room_${cleanPin}`);
       channel.onmessage = (event) => {
-        const msg = event.data;
-        if (!msg) return;
-
-        if (msg.type === 'SESSION_UPDATE' && callbacks.onSessionUpdate) {
-          callbacks.onSessionUpdate(msg.session);
-        } else if (msg.type === 'PARTICIPANTS_UPDATE' && callbacks.onParticipantsUpdate) {
-          callbacks.onParticipantsUpdate(msg.participants);
-        } else if (msg.type === 'GAME_STARTED' && callbacks.onGameStart) {
-          callbacks.onGameStart(msg.session);
-        } else if (msg.type === 'GAME_FINISHED' && callbacks.onGameFinished) {
-          callbacks.onGameFinished(msg.result);
-        } else if (msg.type === 'PARTICIPANT_JOINED') {
-          const list = this.getParticipants(cleanPin);
-          if (callbacks.onParticipantsUpdate) callbacks.onParticipantsUpdate(list);
-        }
+        handleIncomingMessage(event.data);
       };
       this.activeBroadcastChannels.set(cleanPin, channel);
     } catch (e) {
       console.warn('BroadcastChannel not available in this environment:', e);
     }
 
-    // 2. Storage event listener for window synchronization
+    // 2. Cross-device Realtime channel via Supabase WebSocket
+    let supabaseChannel: any = null;
+    if (isSupabaseConfigured) {
+      try {
+        supabaseChannel = supabase.channel(`arena_mp_${cleanPin}`, {
+          config: { broadcast: { self: false } },
+        });
+        supabaseChannel
+          .on('broadcast', { event: 'match_event' }, ({ payload }: any) => {
+            handleIncomingMessage(payload);
+          })
+          .subscribe();
+      } catch (err) {
+        console.warn('Supabase realtime channel subscription failed:', err);
+      }
+    }
+
+    // 3. Storage event listener for fallback window synchronization
     const handleStorage = (e: StorageEvent) => {
       if (e.key === `biblearena_participants_${cleanPin}`) {
         const list = this.getParticipants(cleanPin);
@@ -270,6 +310,11 @@ class MultiplayerGameService {
         channel.close();
         this.activeBroadcastChannels.delete(cleanPin);
       }
+      if (supabaseChannel) {
+        try {
+          supabase.removeChannel(supabaseChannel);
+        } catch {}
+      }
       window.removeEventListener('storage', handleStorage);
     };
   }
@@ -282,29 +327,134 @@ class MultiplayerGameService {
         channel.postMessage(payload);
       } catch {}
     }
+
+    // Also broadcast to Supabase Realtime channel for remote devices
+    if (isSupabaseConfigured) {
+      try {
+        const sbChannel = supabase.channel(`arena_mp_${cleanPin}`);
+        sbChannel.send({
+          type: 'broadcast',
+          event: 'match_event',
+          payload,
+        });
+      } catch {}
+    }
   }
 
   // --------------------------------------------------------------------------
   // 5. SESSION CONTROLS (Host Only)
   // --------------------------------------------------------------------------
-  startGameMatch(pin: string): MultiplayerMatchConfig {
+  getSessionByPin(pin: string): MultiplayerMatchConfig | null {
+    const cleanPin = pin.trim().replace(/\D/g, '');
+    return this.getLocalSession(cleanPin);
+  }
+
+  startGameMatch(pin: string, totalQuestions = 10): MultiplayerMatchConfig {
     const cleanPin = pin.trim().replace(/\D/g, '');
     const session = this.getLocalSession(cleanPin);
     if (!session) throw new Error('Session not found');
 
+    const now = Date.now();
+    const duration = session.timeLimitSeconds || 25;
+
     session.status = 'active';
+    session.currentQuestionIndex = 0;
+    session.totalQuestions = totalQuestions;
+    session.roundPhase = 'answering';
+    session.phaseStartTime = now;
+    session.phaseEndTime = now + duration * 1000;
     this.saveLocalSession(session);
 
     // Set all participants to playing
     const parts = this.getParticipants(cleanPin).map((p) => ({
       ...p,
       status: 'playing' as const,
+      currentChallengeIndex: 0,
+      challengesCompleted: 0,
+      score: 0,
+      accuracy: 0,
+      streak: 0,
+      totalTimeMs: 0,
     }));
     this.saveParticipants(cleanPin, parts);
 
     this.broadcastEvent(cleanPin, { type: 'GAME_STARTED', session });
     this.broadcastEvent(cleanPin, { type: 'PARTICIPANTS_UPDATE', participants: parts });
+    this.broadcastEvent(cleanPin, {
+      type: 'ROUND_START',
+      questionIndex: 0,
+      phaseEndTime: session.phaseEndTime,
+      timeLimitSeconds: duration,
+    });
+
     return session;
+  }
+
+  startQuestionRound(
+    pin: string,
+    questionIndex: number,
+    timeLimitSeconds = 25,
+    totalQuestions = 10
+  ): MultiplayerMatchConfig {
+    const cleanPin = pin.trim().replace(/\D/g, '');
+    const session = this.getLocalSession(cleanPin);
+    if (!session) throw new Error('Session not found');
+
+    const now = Date.now();
+    session.currentQuestionIndex = questionIndex;
+    session.totalQuestions = totalQuestions;
+    session.roundPhase = 'answering';
+    session.phaseStartTime = now;
+    session.phaseEndTime = now + timeLimitSeconds * 1000;
+    session.revealedCorrectAnswer = undefined;
+    this.saveLocalSession(session);
+
+    this.broadcastEvent(cleanPin, {
+      type: 'ROUND_START',
+      questionIndex,
+      phaseEndTime: session.phaseEndTime,
+      timeLimitSeconds,
+    });
+    this.broadcastEvent(cleanPin, { type: 'SESSION_UPDATE', session });
+
+    return session;
+  }
+
+  revealQuestionRound(
+    pin: string,
+    questionIndex: number,
+    revealDurationSeconds = 2.5,
+    answerData?: any
+  ): MultiplayerMatchConfig {
+    const cleanPin = pin.trim().replace(/\D/g, '');
+    const session = this.getLocalSession(cleanPin);
+    if (!session) throw new Error('Session not found');
+
+    const now = Date.now();
+    session.currentQuestionIndex = questionIndex;
+    session.roundPhase = 'revealing';
+    session.phaseStartTime = now;
+    session.phaseEndTime = now + revealDurationSeconds * 1000;
+    session.revealedCorrectAnswer = answerData;
+    this.saveLocalSession(session);
+
+    this.broadcastEvent(cleanPin, {
+      type: 'ROUND_REVEAL',
+      questionIndex,
+      phaseEndTime: session.phaseEndTime,
+      answerData,
+    });
+    this.broadcastEvent(cleanPin, { type: 'SESSION_UPDATE', session });
+
+    return session;
+  }
+
+  checkAllParticipantsAnswered(pin: string, questionIndex: number): boolean {
+    const cleanPin = pin.trim().replace(/\D/g, '');
+    const parts = this.getParticipants(cleanPin);
+    if (parts.length === 0) return true;
+    // Check if every active participant has completed challenges up to questionIndex + 1
+    return parts.every((p) => p.challengesCompleted >= questionIndex + 1 || p.status === 'disconnected');
   }
 
   closeSession(pin: string): void {
@@ -598,6 +748,27 @@ class MultiplayerGameService {
       ...entry,
       rank: idx + 1,
     }));
+  }
+
+  getActiveRooms(): Array<{ session: MultiplayerMatchConfig; participants: MultiplayerParticipant[] }> {
+    const active: Array<{ session: MultiplayerMatchConfig; participants: MultiplayerParticipant[] }> = [];
+    try {
+      if (typeof localStorage === 'undefined') return [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('biblearena_session_')) {
+          const raw = localStorage.getItem(key);
+          if (raw) {
+            const sess = JSON.parse(raw) as MultiplayerMatchConfig;
+            if (sess && sess.status !== 'completed' && sess.pin) {
+              const parts = this.getParticipants(sess.pin);
+              active.push({ session: sess, participants: parts });
+            }
+          }
+        }
+      }
+    } catch {}
+    return active;
   }
 
   // --------------------------------------------------------------------------

@@ -13,6 +13,14 @@ export interface MultiplayerMatchConfig {
   timeLimitSeconds: number;
   status: 'lobby' | 'active' | 'results' | 'completed';
   createdAt: string;
+
+  // Synchronized authoritative round timing
+  currentQuestionIndex?: number;
+  totalQuestions?: number;
+  roundPhase?: 'answering' | 'revealing' | 'completed';
+  phaseStartTime?: number; // epoch ms
+  phaseEndTime?: number;   // epoch ms
+  revealedCorrectAnswer?: any;
 }
 
 export interface MultiplayerParticipant {

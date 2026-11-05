@@ -22,6 +22,7 @@ import type {
 } from '../../types/multiplayerGame';
 import { AvatarDisplay } from '../ui/AvatarDisplay';
 import { Button } from '../ui/Button';
+import { JoinGamePinModal } from './JoinGamePinModal';
 import {
   Trophy,
   Play,
@@ -43,6 +44,12 @@ interface InteractiveGameHubProps {
   onBackToHome: () => void;
   onLaunchLiveArena?: (modeId: GameModeId) => void;
   onGameplayStateChange?: (isActive: boolean) => void;
+  initialMultiplayerSession?: {
+    session: MultiplayerMatchConfig;
+    participant: MultiplayerParticipant;
+  } | null;
+  initialGamePin?: string;
+  onClearInitialSession?: () => void;
 }
 
 type HubViewMode = 'hub' | 'roadmap' | 'playing' | 'results' | 'mp_results';
@@ -51,12 +58,17 @@ export const InteractiveGameHub: React.FC<InteractiveGameHubProps> = ({
   onBackToHome,
   onLaunchLiveArena,
   onGameplayStateChange,
+  initialMultiplayerSession,
+  initialGamePin,
+  onClearInitialSession,
 }) => {
   void onLaunchLiveArena;
   // Navigation / View state
   const [viewMode, setViewMode] = useState<HubViewMode>('hub');
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
   const [activeGame, setActiveGame] = useState<GameModeInfo | null>(null);
+  const [isJoinPinModalOpen, setIsJoinPinModalOpen] = useState(false);
+  const [autoAdvanceCountdown, setAutoAdvanceCountdown] = useState<number | null>(null);
 
   // Progression state for active game mode
   const [modeProgress, setModeProgress] = useState<GameModeProgressState | null>(null);
@@ -113,6 +125,22 @@ export const InteractiveGameHub: React.FC<InteractiveGameHubProps> = ({
   const [activeMatchResult, setActiveMatchResult] = useState<MultiplayerMatchResult | null>(null);
   const [myParticipantId, setMyParticipantId] = useState<string>('');
 
+  // Handle incoming initial multiplayer session from URL / routing / live-arena
+  useEffect(() => {
+    if (initialMultiplayerSession) {
+      handleStartMultiplayerMatch(
+        initialMultiplayerSession.session,
+        multiplayerGameService.getParticipants(initialMultiplayerSession.session.pin)
+      );
+      onClearInitialSession?.();
+    } else if (initialGamePin && initialGamePin.length === 6) {
+      const sess = multiplayerGameService.getSessionByPin(initialGamePin);
+      if (sess) {
+        setIsJoinPinModalOpen(true);
+      }
+    }
+  }, [initialMultiplayerSession, initialGamePin]);
+
   // Subscribe to real-time events during an active multiplayer session
   useEffect(() => {
     if (!isMultiplayer || !multiplayerSession) return;
@@ -121,16 +149,29 @@ export const InteractiveGameHub: React.FC<InteractiveGameHubProps> = ({
       onParticipantsUpdate: (parts) => {
         setMultiplayerParticipants(parts);
       },
+      onRoundStart: (payload) => {
+        setCurrentQIndex(payload.questionIndex);
+        if (currentLevelData && currentLevelData.questions[payload.questionIndex]) {
+          setupQuestion(currentLevelData.questions[payload.questionIndex], payload.phaseEndTime);
+        }
+      },
+      onRoundReveal: () => {
+        setIsAnswerRevealed(true);
+        setTimerActive(false);
+      },
       onGameFinished: (res) => {
         setActiveMatchResult(res);
         setViewMode('mp_results');
+      },
+      onSessionUpdate: (s) => {
+        setMultiplayerSession(s);
       },
     });
 
     return () => {
       unsubscribe();
     };
-  }, [isMultiplayer, multiplayerSession]);
+  }, [isMultiplayer, multiplayerSession, currentLevelData]);
 
   const handleOpenMultiplayerModal = (game: GameModeInfo, level = 1) => {
     setMultiplayerTargetGame(game);
@@ -143,6 +184,7 @@ export const InteractiveGameHub: React.FC<InteractiveGameHubProps> = ({
     participants?: MultiplayerParticipant[]
   ) => {
     setIsMultiplayerModalOpen(false);
+    setIsJoinPinModalOpen(false);
     setIsMultiplayer(true);
     setMultiplayerSession(session);
     const guest = multiplayerGameService.getGuestIdentity();
@@ -164,12 +206,25 @@ export const InteractiveGameHub: React.FC<InteractiveGameHubProps> = ({
 
     const levelData = getGameModeLevelData(targetModeId, session.levelNumber);
     setCurrentLevelData(levelData);
-    setCurrentQIndex(0);
+    const qIndex = session.currentQuestionIndex || 0;
+    setCurrentQIndex(qIndex);
     setLevelCorrectCount(0);
     setLevelTotalPoints(0);
     setLastResult(null);
 
-    setupQuestion(levelData.questions[0]);
+    const currentQ = levelData.questions[qIndex];
+    setupQuestion(currentQ, session.phaseEndTime);
+
+    // If host and starting from lobby, initialize round 0 in authoritative service
+    if (session.hostId === myId && session.roundPhase !== 'answering') {
+      multiplayerGameService.startQuestionRound(
+        session.pin,
+        0,
+        currentQ.timeLimitSeconds || 25,
+        levelData.questions.length
+      );
+    }
+
     setViewMode('playing');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -216,12 +271,19 @@ export const InteractiveGameHub: React.FC<InteractiveGameHubProps> = ({
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const setupQuestion = (q: GameRoundData) => {
+  const setupQuestion = (q: GameRoundData, authoritativeEndTime?: number) => {
     setActiveQuestion(q);
-    setTimeLeft(q.timeLimitSeconds || 25);
+    const limit = q.timeLimitSeconds || 25;
+    if (authoritativeEndTime && authoritativeEndTime > Date.now()) {
+      const rem = Math.max(0, Math.ceil((authoritativeEndTime - Date.now()) / 1000));
+      setTimeLeft(rem);
+    } else {
+      setTimeLeft(limit);
+    }
     setIsAnswerRevealed(false);
     setSelectedOptionIdx(null);
     setRoundPointsEarned(0);
+    setAutoAdvanceCountdown(null);
 
     // Initialize specialized mechanics
     if (q.scrambledWords) {
@@ -249,7 +311,13 @@ export const InteractiveGameHub: React.FC<InteractiveGameHubProps> = ({
     }
 
     const t = setInterval(() => {
-      setTimeLeft((prev) => prev - 1);
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          handleCompleteCurrentQuestion(false);
+          return 0;
+        }
+        return prev - 1;
+      });
     }, 1000);
 
     return () => clearInterval(t);
@@ -295,7 +363,90 @@ export const InteractiveGameHub: React.FC<InteractiveGameHubProps> = ({
         setMultiplayerParticipants(parts);
       }
     }
+
+    // Host authoritative broadcast for reveal
+    if (isMultiplayer && multiplayerSession && multiplayerSession.hostId === myParticipantId) {
+      multiplayerGameService.revealQuestionRound(
+        multiplayerSession.pin,
+        currentQIndex,
+        2.5,
+        activeQuestion.correctOptionIndex
+      );
+    }
   };
+
+  // Automated Question and Round Transitions (CRITICAL REQUIREMENT #4)
+  useEffect(() => {
+    if (viewMode !== 'playing' || !isAnswerRevealed || !currentLevelData || !activeGame) {
+      setAutoAdvanceCountdown(null);
+      return;
+    }
+
+    const DURATION_MS = 2500;
+    const start = Date.now();
+    setAutoAdvanceCountdown(Math.ceil(DURATION_MS / 1000));
+
+    const interval = setInterval(() => {
+      const elapsed = Date.now() - start;
+      const rem = Math.max(0, Math.ceil((DURATION_MS - elapsed) / 1000));
+      setAutoAdvanceCountdown(rem);
+
+      if (elapsed >= DURATION_MS) {
+        clearInterval(interval);
+
+        if (isMultiplayer) {
+          if (multiplayerSession && multiplayerSession.hostId === myParticipantId) {
+            // Authoritative Host advances question or completes match
+            if (currentQIndex < currentLevelData.questions.length - 1) {
+              const nextIdx = currentQIndex + 1;
+              const nextQ = currentLevelData.questions[nextIdx];
+              multiplayerGameService.startQuestionRound(
+                multiplayerSession.pin,
+                nextIdx,
+                nextQ.timeLimitSeconds || 25,
+                currentLevelData.questions.length
+              );
+              setCurrentQIndex(nextIdx);
+              setupQuestion(nextQ);
+            } else {
+              // Final round completed!
+              const result = multiplayerGameService.finalizeMatch(multiplayerSession.pin, myParticipantId);
+              setActiveMatchResult(result);
+              setViewMode('mp_results');
+            }
+          }
+        } else {
+          // Solo Mode: advance directly without pressing Next
+          handleNextQuestionOrComplete();
+        }
+      }
+    }, 200);
+
+    return () => clearInterval(interval);
+  }, [
+    viewMode,
+    isAnswerRevealed,
+    currentQIndex,
+    currentLevelData,
+    activeGame,
+    isMultiplayer,
+    multiplayerSession,
+    myParticipantId,
+  ]);
+
+  // Client safety fallback watchdog: if host stalls for 4.5s after reveal, auto-advance
+  useEffect(() => {
+    if (!isMultiplayer || viewMode !== 'playing' || !isAnswerRevealed) return;
+    if (multiplayerSession?.hostId === myParticipantId) return;
+
+    const watchdog = setTimeout(() => {
+      if (isAnswerRevealed && viewMode === 'playing') {
+        handleNextQuestionOrComplete();
+      }
+    }, 4500);
+
+    return () => clearTimeout(watchdog);
+  }, [isMultiplayer, viewMode, isAnswerRevealed, multiplayerSession, myParticipantId]);
 
   // Next Question or Complete Level
   const handleNextQuestionOrComplete = () => {
@@ -408,8 +559,8 @@ export const InteractiveGameHub: React.FC<InteractiveGameHubProps> = ({
   if (viewMode === 'hub') {
     return (
       <div className="min-h-screen bg-[#F8FAFC] text-[#0F172A] pb-24 pt-6 px-4 sm:px-6 lg:px-8 space-y-8 animate-fade-in">
-        {/* Back button */}
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
+        {/* Back button and Join Room */}
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
           <Button
             variant="outline"
             size="sm"
@@ -417,6 +568,16 @@ export const InteractiveGameHub: React.FC<InteractiveGameHubProps> = ({
             className="border-[#CBD5E1] text-[#0F172A] hover:bg-slate-100 font-bold cursor-pointer"
           >
             ← Return to Home
+          </Button>
+
+          <Button
+            variant="gold"
+            size="sm"
+            onClick={() => setIsJoinPinModalOpen(true)}
+            leftIcon={<Users className="w-4 h-4" />}
+            className="font-black text-xs shadow-md cursor-pointer"
+          >
+            Join Room with PIN / QR
           </Button>
         </div>
 
@@ -538,6 +699,15 @@ export const InteractiveGameHub: React.FC<InteractiveGameHubProps> = ({
             onStartMultiplayer={(sess, parts) => handleStartMultiplayerMatch(sess, parts)}
           />
         )}
+
+        <JoinGamePinModal
+          isOpen={isJoinPinModalOpen}
+          onClose={() => setIsJoinPinModalOpen(false)}
+          initialPin={initialGamePin}
+          onJoinSuccess={(sess, part) => {
+            handleStartMultiplayerMatch(sess, [part]);
+          }}
+        />
       </div>
     );
   }
@@ -558,8 +728,8 @@ export const InteractiveGameHub: React.FC<InteractiveGameHubProps> = ({
 
     return (
       <div className="min-h-screen bg-[#F8FAFC] text-[#0F172A] pb-24 pt-6 px-4 sm:px-6 lg:px-8 space-y-8 animate-fade-in">
-        {/* Top bar back */}
-        <div className="max-w-6xl mx-auto flex items-center justify-between">
+        {/* Top bar back & Join Room */}
+        <div className="max-w-6xl mx-auto flex items-center justify-between gap-3">
           <Button
             variant="outline"
             size="sm"
@@ -569,9 +739,15 @@ export const InteractiveGameHub: React.FC<InteractiveGameHubProps> = ({
             ← Back to All Games
           </Button>
 
-          <span className="text-xs font-inter font-bold text-[#64748B]">
-            {activeGame.category}
-          </span>
+          <Button
+            variant="gold"
+            size="sm"
+            onClick={() => setIsJoinPinModalOpen(true)}
+            leftIcon={<Users className="w-4 h-4" />}
+            className="font-black text-xs shadow-md cursor-pointer"
+          >
+            Join Room PIN / QR
+          </Button>
         </div>
 
         {/* Header Mode Overview Banner */}
@@ -824,9 +1000,22 @@ export const InteractiveGameHub: React.FC<InteractiveGameHubProps> = ({
                     )}
 
                     {isUnlocked && (
-                      <button className="p-1.5 rounded-lg bg-[#7C3AED]/20 text-[#7C3AED] hover:bg-[#7C3AED] hover:text-white transition-colors cursor-pointer">
-                        <ArrowRight className="w-3.5 h-3.5" />
-                      </button>
+                      <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          onClick={() => handleOpenMultiplayerModal(activeGame, levelNum)}
+                          title="Play with Friends"
+                          className="p-1.5 rounded-lg bg-amber-50 text-[#D97706] hover:bg-amber-100 transition-colors cursor-pointer"
+                        >
+                          <Users className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleStartLevel(levelNum)}
+                          title="Play Solo"
+                          className="p-1.5 rounded-lg bg-[#7C3AED]/20 text-[#7C3AED] hover:bg-[#7C3AED] hover:text-white transition-colors cursor-pointer"
+                        >
+                          <ArrowRight className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>
@@ -845,6 +1034,15 @@ export const InteractiveGameHub: React.FC<InteractiveGameHubProps> = ({
             onStartMultiplayer={(sess, parts) => handleStartMultiplayerMatch(sess, parts)}
           />
         )}
+
+        <JoinGamePinModal
+          isOpen={isJoinPinModalOpen}
+          onClose={() => setIsJoinPinModalOpen(false)}
+          initialPin={initialGamePin}
+          onJoinSuccess={(sess, part) => {
+            handleStartMultiplayerMatch(sess, [part]);
+          }}
+        />
       </div>
     );
   }
@@ -1101,6 +1299,57 @@ export const InteractiveGameHub: React.FC<InteractiveGameHubProps> = ({
           </div>
         )}
 
+        {/* MECHANIC: BIBLE ANAGRAM */}
+        {activeGame.id === 'bible-anagram' && activeQuestion.anagramLetters && (
+          <div className="bg-white p-5 sm:p-6 rounded-3xl border-2 border-[#E2E8F0] shadow-sm space-y-3">
+            <span className="text-xs font-bold text-[#64748B] block">
+              Unscramble these biblical letter tiles:
+            </span>
+            <div className="flex flex-wrap justify-center gap-2.5 py-2">
+              {activeQuestion.anagramLetters.map((letter, lIdx) => (
+                <div
+                  key={lIdx}
+                  className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-400 to-amber-600 text-white font-outfit font-black text-xl flex items-center justify-center shadow-md border-2 border-white/50 animate-bounce"
+                  style={{ animationDelay: `${lIdx * 100}ms` }}
+                >
+                  {letter}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* MECHANIC: WHO AM I MYSTERY CLUES */}
+        {activeGame.id === 'who-am-i' && activeQuestion.mysteryClues && (
+          <div className="bg-white p-5 sm:p-6 rounded-3xl border-2 border-[#E2E8F0] shadow-sm space-y-3">
+            <span className="text-xs font-bold text-[#64748B] block">
+              Biblical Mystery Clues:
+            </span>
+            <div className="space-y-2">
+              {activeQuestion.mysteryClues.map((clue, cIdx) => (
+                <div
+                  key={cIdx}
+                  className="p-3 rounded-2xl bg-[#F8FAFC] border border-slate-200 text-xs sm:text-sm font-bold text-[#0F172A] flex items-start gap-2.5"
+                >
+                  <span className="w-5 h-5 rounded-full bg-purple-100 text-[#7C3AED] font-outfit font-black text-[10px] flex items-center justify-center shrink-0 mt-0.5">
+                    {cIdx + 1}
+                  </span>
+                  <span>{clue}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* MECHANIC: EMOJI CHALLENGE DISPLAY */}
+        {activeGame.id === 'emoji-challenge' && (
+          <div className="bg-gradient-to-r from-purple-50 via-indigo-50 to-amber-50 p-6 rounded-3xl border-2 border-purple-200 text-center shadow-sm">
+            <span className="text-4xl sm:text-6xl tracking-widest block filter drop-shadow-sm py-2">
+              {activeQuestion.prompt.match(/[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu)?.join(' ') || '📜 🕊️ ✝️'}
+            </span>
+          </div>
+        )}
+
         {/* MECHANIC 4: STANDARD 4-CHOICE & TRUE/FALSE FUNKWIZ ANSWER CARDS */}
         {activeQuestion.options && activeGame.id !== 'scripture-scramble' && activeGame.id !== 'sequence-challenge' && activeGame.id !== 'character-match' && (
           <div className={`grid gap-4 ${activeQuestion.options.length === 2 ? 'grid-cols-2' : 'grid-cols-1 sm:grid-cols-2'}`}>
@@ -1146,7 +1395,7 @@ export const InteractiveGameHub: React.FC<InteractiveGameHubProps> = ({
 
         {/* SCRIPTURE REVELATION CARD (AFTER QUESTION COMPLETION) */}
         {isAnswerRevealed && (
-          <div className="bg-white border-2 border-purple-200 rounded-3xl p-6 shadow-md space-y-3 animate-scale-in">
+          <div className="bg-white border-2 border-purple-200 rounded-3xl p-6 shadow-md space-y-4 animate-scale-in">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-2">
                 {roundPointsEarned > 0 ? (
@@ -1173,16 +1422,21 @@ export const InteractiveGameHub: React.FC<InteractiveGameHubProps> = ({
               {activeQuestion.explanation}
             </p>
 
-            <div className="pt-2 flex justify-end">
-              <Button
-                variant="gold"
-                size="md"
-                onClick={handleNextQuestionOrComplete}
-                rightIcon={<ArrowRight className="w-4 h-4" />}
-                className="font-black text-sm cursor-pointer"
-              >
-                {currentQIndex < currentLevelData.questions.length - 1 ? 'Next Question' : 'Complete Level'}
-              </Button>
+            {/* AUTOMATIC QUESTION TRANSITION INDICATOR (NO MANUAL NEXT BUTTON REQUIRED) */}
+            <div className="pt-2 flex items-center justify-between border-t border-slate-100">
+              <div className="flex items-center gap-1.5 text-xs font-bold text-[#64748B]">
+                <Clock className="w-3.5 h-3.5 text-[#7C3AED]" />
+                <span>Automatic Transition</span>
+              </div>
+
+              <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-purple-50 border border-purple-200 text-[#7C3AED] font-outfit text-xs font-black shadow-xs shrink-0 animate-pulse">
+                <span>⚡</span>
+                <span>
+                  {currentQIndex < currentLevelData.questions.length - 1
+                    ? `Next Question in ${autoAdvanceCountdown ?? 2}s...`
+                    : 'Finalizing Arena Results...'}
+                </span>
+              </div>
             </div>
           </div>
         )}

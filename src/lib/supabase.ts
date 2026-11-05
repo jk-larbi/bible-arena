@@ -10,8 +10,8 @@ function sanitize(val: string | undefined): string | undefined {
   return val.replace(/[^\x20-\x7E]/g, '').trim();
 }
 
-const rawUrl = sanitize(import.meta.env.VITE_SUPABASE_URL as string | undefined);
-const rawAnonKey = sanitize(import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined);
+const rawUrl = sanitize(typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_SUPABASE_URL as string | undefined : undefined);
+const rawAnonKey = sanitize(typeof import.meta !== 'undefined' && import.meta.env ? import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined : undefined);
 
 // Prefer environment variable if set and valid, otherwise fallback to active project credentials
 export const supabaseUrl: string =

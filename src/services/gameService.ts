@@ -1,5 +1,6 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import type { LiveParticipant } from '../types/bibleArena';
+import { multiplayerGameService } from './multiplayerGameService';
 
 export interface JoinGameResult {
   participantId: string;
@@ -9,6 +10,8 @@ export interface JoinGameResult {
   status: string;
   roundPhase: string;
   currentQuestionIndex: number;
+  isGameMode?: boolean;
+  gameModeId?: string;
 }
 
 export interface AnswerSubmissionResult {
@@ -196,9 +199,30 @@ export const gameService = {
     allowGuests: boolean;
     participantCount: number;
     participantLimit: number;
+    isGameMode?: boolean;
+    gameModeId?: string;
   } | null> {
     const cleanPin = pin.trim().replace(/\D/g, '');
     if (cleanPin.length !== 6) return null;
+
+    // Check if this PIN belongs to a Multiplayer Game Mode session
+    const mpSession = multiplayerGameService.getSessionByPin(cleanPin);
+    if (mpSession) {
+      const parts = multiplayerGameService.getParticipants(cleanPin);
+      return {
+        id: mpSession.sessionId,
+        pin: mpSession.pin,
+        title: mpSession.gameTitle,
+        hostName: mpSession.hostName,
+        category: 'Interactive Game',
+        status: mpSession.status,
+        allowGuests: true,
+        participantCount: parts.length,
+        participantLimit: 50,
+        isGameMode: true,
+        gameModeId: mpSession.gameModeId,
+      };
+    }
 
     if (!isSupabaseConfigured) {
       // Local/offline fallback
@@ -272,6 +296,29 @@ export const gameService = {
     nickname: string;
     avatar?: string;
   }): Promise<JoinGameResult> {
+    const cleanPin = params.pin.trim().replace(/\D/g, '');
+
+    // Check if PIN belongs to an interactive game mode session
+    const mpSession = multiplayerGameService.getSessionByPin(cleanPin);
+    if (mpSession) {
+      const res = await multiplayerGameService.joinGameModeSession({
+        pin: cleanPin,
+        nickname: params.nickname,
+        avatar: params.avatar || 'hero-david',
+      });
+      return {
+        participantId: res.participant.id,
+        sessionId: res.session.sessionId,
+        pin: res.session.pin,
+        title: res.session.gameTitle,
+        status: res.session.status,
+        roundPhase: res.session.roundPhase || 'answering',
+        currentQuestionIndex: res.session.currentQuestionIndex || 0,
+        isGameMode: true,
+        gameModeId: res.session.gameModeId,
+      };
+    }
+
     if (!isSupabaseConfigured) {
       // Offline fallback
       return {
