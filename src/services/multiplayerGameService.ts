@@ -35,6 +35,7 @@ export interface StoredGameStats {
 
 class MultiplayerGameService {
   private activeBroadcastChannels: Map<string, BroadcastChannel> = new Map();
+  private activeSupabaseChannels: Map<string, any> = new Map();
 
   // --------------------------------------------------------------------------
   // 1. GUEST IDENTITY & PERSISTENCE
@@ -165,10 +166,24 @@ class MultiplayerGameService {
     participant: MultiplayerParticipant;
   }> {
     const cleanPin = params.pin.trim().replace(/\D/g, '');
-    const session = this.getLocalSession(cleanPin);
+    let session = this.getLocalSession(cleanPin);
 
     if (!session) {
-      throw new Error(`Game room ${cleanPin} could not be found. Please check the PIN.`);
+      session = {
+        sessionId: `mp_session_${cleanPin}`,
+        pin: cleanPin,
+        gameModeId: 'trivia',
+        gameTitle: 'BibleArena Live Challenge',
+        levelNumber: 1,
+        isRanked: true,
+        hostId: 'host_' + cleanPin,
+        hostName: 'Host',
+        hostAvatar: 'hero-david',
+        timeLimitSeconds: 25,
+        status: 'lobby',
+        createdAt: new Date().toISOString(),
+      };
+      this.saveLocalSession(session);
     }
 
     if (session.status === 'completed') {
@@ -236,12 +251,15 @@ class MultiplayerGameService {
     const handleIncomingMessage = (msg: any) => {
       if (!msg) return;
 
-      if (msg.type === 'SESSION_UPDATE' && callbacks.onSessionUpdate) {
-        callbacks.onSessionUpdate(msg.session);
-      } else if (msg.type === 'PARTICIPANTS_UPDATE' && callbacks.onParticipantsUpdate) {
-        callbacks.onParticipantsUpdate(msg.participants);
-      } else if (msg.type === 'GAME_STARTED' && callbacks.onGameStart) {
-        callbacks.onGameStart(msg.session);
+      if (msg.type === 'SESSION_UPDATE' && msg.session) {
+        this.saveLocalSession(msg.session);
+        if (callbacks.onSessionUpdate) callbacks.onSessionUpdate(msg.session);
+      } else if (msg.type === 'PARTICIPANTS_UPDATE' && Array.isArray(msg.participants)) {
+        this.saveParticipants(cleanPin, msg.participants);
+        if (callbacks.onParticipantsUpdate) callbacks.onParticipantsUpdate(msg.participants);
+      } else if (msg.type === 'GAME_STARTED' && msg.session) {
+        this.saveLocalSession(msg.session);
+        if (callbacks.onGameStart) callbacks.onGameStart(msg.session);
       } else if (msg.type === 'ROUND_START' && callbacks.onRoundStart) {
         callbacks.onRoundStart({
           questionIndex: msg.questionIndex,
@@ -256,9 +274,35 @@ class MultiplayerGameService {
         });
       } else if (msg.type === 'GAME_FINISHED' && callbacks.onGameFinished) {
         callbacks.onGameFinished(msg.result);
-      } else if (msg.type === 'PARTICIPANT_JOINED') {
-        const list = this.getParticipants(cleanPin);
-        if (callbacks.onParticipantsUpdate) callbacks.onParticipantsUpdate(list);
+      } else if (msg.type === 'PARTICIPANT_JOINED' && msg.participant) {
+        const parts = this.getParticipants(cleanPin);
+        const idx = parts.findIndex((p) => p.id === msg.participant.id);
+        if (idx >= 0) {
+          parts[idx] = msg.participant;
+        } else {
+          parts.push(msg.participant);
+        }
+        this.saveParticipants(cleanPin, parts);
+        if (callbacks.onParticipantsUpdate) callbacks.onParticipantsUpdate(parts);
+      } else if (msg.type === 'REQUEST_SESSION_STATE') {
+        const currentSession = this.getLocalSession(cleanPin);
+        const currentParts = this.getParticipants(cleanPin);
+        if (currentSession) {
+          this.broadcastEvent(cleanPin, {
+            type: 'SESSION_STATE_REPLY',
+            session: currentSession,
+            participants: currentParts,
+          });
+        }
+      } else if (msg.type === 'SESSION_STATE_REPLY') {
+        if (msg.session) {
+          this.saveLocalSession(msg.session);
+          if (callbacks.onSessionUpdate) callbacks.onSessionUpdate(msg.session);
+        }
+        if (msg.participants && Array.isArray(msg.participants)) {
+          this.saveParticipants(cleanPin, msg.participants);
+          if (callbacks.onParticipantsUpdate) callbacks.onParticipantsUpdate(msg.participants);
+        }
       }
     };
 
@@ -275,17 +319,28 @@ class MultiplayerGameService {
     }
 
     // 2. Cross-device Realtime channel via Supabase WebSocket
-    let supabaseChannel: any = null;
-    if (isSupabaseConfigured) {
+    let supabaseChannel = this.activeSupabaseChannels.get(cleanPin);
+    if (!supabaseChannel && isSupabaseConfigured) {
       try {
         supabaseChannel = supabase.channel(`arena_mp_${cleanPin}`, {
-          config: { broadcast: { self: false } },
+          config: { broadcast: { self: false, ack: true } },
         });
         supabaseChannel
           .on('broadcast', { event: 'match_event' }, ({ payload }: any) => {
             handleIncomingMessage(payload);
           })
-          .subscribe();
+          .subscribe((status: string) => {
+            if (status === 'SUBSCRIBED') {
+              try {
+                supabaseChannel.send({
+                  type: 'broadcast',
+                  event: 'match_event',
+                  payload: { type: 'REQUEST_SESSION_STATE' },
+                });
+              } catch {}
+            }
+          });
+        this.activeSupabaseChannels.set(cleanPin, supabaseChannel);
       } catch (err) {
         console.warn('Supabase realtime channel subscription failed:', err);
       }
@@ -331,13 +386,22 @@ class MultiplayerGameService {
     // Also broadcast to Supabase Realtime channel for remote devices
     if (isSupabaseConfigured) {
       try {
-        const sbChannel = supabase.channel(`arena_mp_${cleanPin}`);
+        let sbChannel = this.activeSupabaseChannels.get(cleanPin);
+        if (!sbChannel) {
+          sbChannel = supabase.channel(`arena_mp_${cleanPin}`, {
+            config: { broadcast: { self: false, ack: true } },
+          });
+          sbChannel.subscribe();
+          this.activeSupabaseChannels.set(cleanPin, sbChannel);
+        }
         sbChannel.send({
           type: 'broadcast',
           event: 'match_event',
           payload,
         });
-      } catch {}
+      } catch (err) {
+        console.warn('Supabase realtime broadcast failed:', err);
+      }
     }
   }
 

@@ -134,10 +134,7 @@ export const InteractiveGameHub: React.FC<InteractiveGameHubProps> = ({
       );
       onClearInitialSession?.();
     } else if (initialGamePin && initialGamePin.length === 6) {
-      const sess = multiplayerGameService.getSessionByPin(initialGamePin);
-      if (sess) {
-        setIsJoinPinModalOpen(true);
-      }
+      setIsJoinPinModalOpen(true);
     }
   }, [initialMultiplayerSession, initialGamePin]);
 

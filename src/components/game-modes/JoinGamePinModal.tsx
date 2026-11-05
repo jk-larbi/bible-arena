@@ -63,7 +63,14 @@ export const JoinGamePinModal: React.FC<JoinGamePinModalProps> = ({
         setSessionPreview(sess);
         setErrorMsg(null);
       } else {
-        setSessionPreview(null);
+        // Connect to room channel over WebSocket to discover host's session in real time
+        const unsub = multiplayerGameService.subscribeToGameSession(clean, {
+          onSessionUpdate: (s) => {
+            setSessionPreview(s);
+            setErrorMsg(null);
+          },
+        });
+        return () => unsub();
       }
     } else {
       setSessionPreview(null);
