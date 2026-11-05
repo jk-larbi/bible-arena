@@ -1,0 +1,149 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+@theme {
+  /* Typography Families with robust local & system fallbacks */
+  --font-outfit: 'Outfit', 'Lexend', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-heading: 'Outfit', 'Lexend', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-display: 'Outfit', 'Lexend', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-inter: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+
+  --color-arena-bg: #F8FAFC;
+  --color-arena-surface: #FFFFFF;
+  --color-arena-border: #E2E8F0;
+  --color-arena-navy: #0F172A;
+  --color-arena-muted: #64748B;
+
+  /* Primary Brand: Soft Purple & Electric Violet */
+  --color-brand-purple: #7C3AED;
+  --color-brand-purple-hover: #6D28D9;
+  --color-brand-purple-light: #F3E8FF;
+  --color-electric-blue: #2563EB;
+  --color-electric-violet: #6366F1;
+
+  /* Gold for Achievements & Rewards */
+  --color-vibrant-gold: #F59E0B;
+  --color-gold-hover: #D97706;
+  --color-gold-light: #FEF3C7;
+
+  /* Four Iconic FunkWiz Answer Colors */
+  --color-funk-red: #EF4444;
+  --color-funk-blue: #3B82F6;
+  --color-funk-gold: #F59E0B;
+  --color-funk-green: #10B981;
+}
+
+:root {
+  --color-bg: #F8FAFC;
+  --color-card: #FFFFFF;
+  --color-text: #0F172A;
+  --color-purple: #7C3AED;
+  --color-gold: #F59E0B;
+}
+
+/* Base Document & Body: Inter for high legibility, clean body text & instructions */
+html,
+body {
+  background-color: #F8FAFC;
+  color: #0F172A;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.55;
+}
+
+/* Primary Headings & Titles: Outfit for bold, confident gaming style */
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Outfit', 'Lexend', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  letter-spacing: -0.025em;
+  font-weight: 800;
+}
+
+/* Ensure inner elements in headings inherit Outfit */
+h1 *, h2 *, h3 *, h4 *, h5 *, h6 * {
+  font-family: inherit;
+}
+
+/* Interactive elements, Buttons, Level Numbers, Scores, Nav & Labels default to Outfit */
+button,
+.btn {
+  font-family: 'Outfit', 'Lexend', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  letter-spacing: -0.01em;
+}
+
+button *,
+.btn * {
+  font-family: inherit;
+}
+
+/* Utility Class: Outfit (Headings, game titles, buttons, navigation, level numbers, scores, labels) */
+.font-outfit,
+.font-outfit * {
+  font-family: 'Outfit', 'Lexend', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+}
+
+/* Utility Class: Inter (Paragraphs, questions, descriptions, instructions, stats) */
+.font-inter,
+.font-inter * {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+}
+
+/* Quiz questions & Body Text: Inter with optimal readability & line height */
+.quiz-question,
+.quiz-question * {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+  letter-spacing: -0.015em;
+  line-height: 1.45;
+}
+
+/* Custom interactive card transitions */
+.bible-card {
+  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+}
+
+.bible-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 12px 24px -4px rgba(124, 58, 237, 0.12), 0 4px 8px -2px rgba(15, 23, 42, 0.05);
+}
+
+/* Tactile 3D button depression on click */
+.btn-tactile {
+  transition: transform 80ms ease, box-shadow 80ms ease;
+}
+.btn-tactile:active {
+  transform: translateY(2px);
+  box-shadow: none !important;
+}
+
+/* Accessible focus ring */
+:focus-visible {
+  outline: 3px solid #7C3AED;
+  outline-offset: 2px;
+}
+
+/* Clean light custom scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #F1F5F9;
+}
+::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 6px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}
+
+/* Safe area padding for mobile bottom bar */
+.pb-safe {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
