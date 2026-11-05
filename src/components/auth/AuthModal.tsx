@@ -30,6 +30,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   // Validation errors
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
+  const [authAlert, setAuthAlert] = useState<string | null>(null);
   const [forgotSuccess, setForgotSuccess] = useState(false);
 
   const resetForm = () => {
@@ -38,6 +39,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setConfirmPassword('');
     setFullName('');
     setErrors({});
+    setAuthAlert(null);
     setForgotSuccess(false);
     setIsLoading(false);
   };
@@ -53,6 +55,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setAuthAlert(null);
     const newErrors: { [key: string]: string } = {};
 
     if (mode === 'signin') {
@@ -71,6 +74,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setIsLoading(false);
       if (success) {
         onClose();
+      } else {
+        setAuthAlert('Sign in was unsuccessful. If you just registered, make sure "Confirm email" is turned off in Supabase, or check your password.');
       }
     } else if (mode === 'register') {
       if (!fullName.trim()) newErrors.fullName = 'Full name is required.';
@@ -93,6 +98,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       setIsLoading(false);
       if (success) {
         onClose();
+      } else {
+        setAuthAlert('Notice: If you see "email rate limit exceeded", turn OFF "Confirm email" in your Supabase Dashboard under Authentication -> Providers -> Email for instant player sign-up without email limits.');
       }
     } else if (mode === 'forgot') {
       if (!email.trim() || !validateEmail(email)) {
@@ -127,6 +134,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       maxWidth="md"
     >
       <div className="space-y-4">
+        {authAlert && (
+          <div className="p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs flex items-start gap-2.5 animate-fadeIn">
+            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <p className="font-semibold text-amber-900">Notice</p>
+              <p className="text-amber-800 leading-relaxed">{authAlert}</p>
+            </div>
+          </div>
+        )}
+
         {mode === 'signin' && (
           <form onSubmit={handleSubmit} className="space-y-4">
             <p className="text-sm text-[#64748B]">

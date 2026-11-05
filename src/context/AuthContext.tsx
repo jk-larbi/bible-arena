@@ -207,7 +207,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
 
       if (error) {
-        showToast(`Sign in error: ${error.message}`);
+        const msg = error.message.toLowerCase();
+        if (msg.includes('email not confirmed')) {
+          showToast('Email not confirmed yet. In your Supabase Dashboard under Authentication -> Providers -> Email, turn OFF "Confirm email" to log in immediately.');
+        } else {
+          showToast(`Sign in error: ${error.message}`);
+        }
         return false;
       }
 
@@ -250,27 +255,58 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
 
       if (error) {
+        const errMsg = error.message.toLowerCase();
+
+        // If rate limit or already registered, attempt direct login in case account was already created
+        if (errMsg.includes('rate limit') || errMsg.includes('already registered')) {
+          const loginAttempt = await supabase.auth.signInWithPassword({
+            email: email.trim(),
+            password: pass,
+          });
+
+          if (loginAttempt.data?.user) {
+            await fetchProfile(loginAttempt.data.user.id, loginAttempt.data.user.email || email);
+            showToast(`Welcome to BibleArena, ${name}! Logged in successfully.`);
+            return true;
+          }
+
+          if (loginAttempt.error?.message.toLowerCase().includes('email not confirmed')) {
+            showToast('Email rate limit reached: Supabase free SMTP limits email sends. In Supabase Dashboard (Auth -> Providers -> Email), toggle OFF "Confirm email" for instant login.');
+            return false;
+          }
+
+          showToast('Email rate limit exceeded by Supabase free mailer. To fix: In Supabase Dashboard -> Auth -> Providers -> Email, turn OFF "Confirm email" to enable instant registration.');
+          return false;
+        }
+
         showToast(`Sign up error: ${error.message}`);
         return false;
       }
 
       if (data.user) {
-        await supabase.from('profiles').upsert({
-          id: data.user.id,
-          name: name.trim(),
-          nickname: cleanNick,
-          email: email.trim(),
-          group_affiliation: groupAffiliation || null,
-          role: 'member',
-          total_points: 0,
-          quizzes_completed: 0,
-          accuracy: 0,
-          streak_days: 0,
-          hosted_arenas_count: 0,
-        });
+        try {
+          await supabase.from('profiles').upsert({
+            id: data.user.id,
+            name: name.trim(),
+            nickname: cleanNick,
+            email: email.trim(),
+            group_affiliation: groupAffiliation || null,
+            role: 'member',
+            total_points: 0,
+            quizzes_completed: 0,
+            accuracy: 0,
+            streak_days: 0,
+            hosted_arenas_count: 0,
+          });
+        } catch {}
 
         await fetchProfile(data.user.id, data.user.email || email);
-        showToast(`Account created! Welcome to BibleArena, ${name}!`);
+
+        if (!data.session) {
+          showToast(`Account registered! Note: Email confirmation is currently required by Supabase. Turn OFF "Confirm email" in Supabase Auth to enable instant auto-login.`);
+        } else {
+          showToast(`Account created! Welcome to BibleArena, ${name}!`);
+        }
         return true;
       }
       return false;
