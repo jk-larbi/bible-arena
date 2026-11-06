@@ -29,6 +29,7 @@ import {
   getStageRange,
   getStageForLevel,
 } from '../../services/championshipService';
+import { playerNotificationService } from '../../services/playerNotificationService';
 import { Button } from '../ui/Button';
 
 interface ChampionshipViewProps {
@@ -62,6 +63,7 @@ export const ChampionshipView: React.FC<ChampionshipViewProps> = ({
   const [userScore, setUserScore] = useState(0);
   const [timeLeft, setTimeLeft] = useState(25);
   const [timerActive, setTimerActive] = useState(false);
+  const [autoAdvanceCountdown, setAutoAdvanceCountdown] = useState<number | null>(null);
 
   // Result state
   const [lastResult, setLastResult] = useState<{
@@ -101,6 +103,7 @@ export const ChampionshipView: React.FC<ChampionshipViewProps> = ({
     const lvl = getChampionshipLevel(levelNumber);
     if (!lvl) return;
 
+    playerNotificationService.recordUserActivity('championship_player');
     setActiveLevel(lvl);
     setCurrentQIndex(0);
     setSelectedOption(null);
@@ -134,8 +137,34 @@ export const ChampionshipView: React.FC<ChampionshipViewProps> = ({
     setSelectedOption(null);
   };
 
+  // Automated Question and Round Transitions (Section 2)
+  useEffect(() => {
+    if (mode !== 'playing' || !isAnswerRevealed || !activeLevel) {
+      setAutoAdvanceCountdown(null);
+      return;
+    }
+
+    const DURATION_MS = 3500;
+    const start = Date.now();
+    setAutoAdvanceCountdown(Math.ceil(DURATION_MS / 1000));
+
+    const interval = setInterval(() => {
+      const elapsed = Date.now() - start;
+      const rem = Math.max(0, Math.ceil((DURATION_MS - elapsed) / 1000));
+      setAutoAdvanceCountdown(rem);
+
+      if (elapsed >= DURATION_MS) {
+        clearInterval(interval);
+        handleNextQuestion();
+      }
+    }, 200);
+
+    return () => clearInterval(interval);
+  }, [mode, isAnswerRevealed, currentQIndex, activeLevel]);
+
   const handleNextQuestion = () => {
     if (!activeLevel) return;
+    setAutoAdvanceCountdown(null);
 
     if (currentQIndex < activeLevel.questions.length - 1) {
       setCurrentQIndex((prev) => prev + 1);
@@ -580,15 +609,27 @@ export const ChampionshipView: React.FC<ChampionshipViewProps> = ({
               {currentQ.explanation}
             </p>
 
-            <div className="pt-2 flex justify-end">
+            {/* Automatic Progression Banner & Skip Button */}
+            <div className="pt-2 flex items-center justify-between bg-slate-50 p-4 rounded-2xl border border-slate-200 animate-fade-in">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-full bg-[#7C3AED] text-white flex items-center justify-center text-xs font-black animate-pulse font-outfit">
+                  {autoAdvanceCountdown || 1}s
+                </div>
+                <span className="text-xs font-bold text-slate-600 font-inter">
+                  {currentQIndex < activeLevel.questions.length - 1
+                    ? `Advancing to next question in ${autoAdvanceCountdown || 1}s...`
+                    : `Completing level in ${autoAdvanceCountdown || 1}s...`}
+                </span>
+              </div>
+
               <Button
                 variant="gold"
-                size="md"
+                size="sm"
                 onClick={handleNextQuestion}
-                rightIcon={<ArrowRight className="w-4 h-4" />}
-                className="font-black text-sm"
+                rightIcon={<ArrowRight className="w-4 h-4 fill-current" />}
+                className="font-black text-xs px-4 py-2 cursor-pointer shadow-xs"
               >
-                {currentQIndex < activeLevel.questions.length - 1 ? 'Next Question' : 'Complete Level'}
+                {currentQIndex < activeLevel.questions.length - 1 ? 'Advance Now' : 'Complete Level'}
               </Button>
             </div>
           </div>

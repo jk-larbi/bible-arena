@@ -9,6 +9,7 @@ import { CategoryBadge, DifficultyBadge } from '../ui/Badge';
 import { Button } from '../ui/Button';
 import { Clock, HelpCircle, Play, User, Sparkles, Layers, CheckCircle2 } from 'lucide-react';
 import { curriculumProgressionService } from '../../services/curriculumProgressionService';
+import { curriculumDataService } from '../../data/curriculum/curriculumDataService';
 
 interface QuizCardProps {
   quiz: Quiz;
@@ -23,8 +24,11 @@ export const QuizCard: React.FC<QuizCardProps> = ({ quiz, onPlay, onViewDetails 
   const progressPercent = progressState ? Math.round((completedLevels / 100) * 100) : 0;
   const currentUnlockLevel = progressState ? progressState.currentLevel : 1;
 
-  // Question count: 2,000 for curriculum topics, or custom count
-  const displayQuestionCount = isCurriculum ? '2,000' : `${quiz.questionCount}`;
+  const curricMeta = isCurriculum ? curriculumDataService.getCurriculumMetadata(quiz.id) : null;
+  // Accurate verified question count and goal disclosure
+  const displayQuestionCount = isCurriculum && curricMeta
+    ? `${curricMeta.verifiedUniqueQuestions.toLocaleString()} Verified (Goal: ${curricMeta.targetQuestions.toLocaleString()})`
+    : `${quiz.questionCount}`;
   const estTimeDisplay = isCurriculum ? '~10 mins / lvl' : `~${quiz.estimatedMinutes} mins`;
 
   return (
@@ -56,7 +60,7 @@ export const QuizCard: React.FC<QuizCardProps> = ({ quiz, onPlay, onViewDetails 
             </div>
           ) : (
             <div className="absolute bottom-3 left-3 bg-[#2563EB] text-white text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full flex items-center gap-1 shadow-xs font-outfit">
-              <Layers className="w-3 h-3" /> 100 Levels • 2,000 Questions
+              <Layers className="w-3 h-3" /> 100 Levels • {curricMeta ? curricMeta.verifiedUniqueQuestions.toLocaleString() : 900} Verified Qs
             </div>
           )}
         </div>

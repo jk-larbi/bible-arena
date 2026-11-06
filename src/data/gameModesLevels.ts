@@ -16,22 +16,24 @@ import { CHARACTERS_QUOTES_BANK } from './gameModes/characterAndQuotes';
 import { CHRONOLOGICAL_SEQUENCES_BANK, CHARACTER_MATCH_BANK } from './gameModes/sequencesAndMatches';
 import { TRUE_FALSE_BANK, FINISH_STORY_BANK, BIBLE_CONNECTIONS_BANK } from './gameModes/theologyAndPlaces';
 
+export function getGradualDifficulty(levelNumber: number): GameDifficulty {
+  if (levelNumber <= 10) return 'Beginner';
+  if (levelNumber <= 20) return 'Easy';
+  if (levelNumber <= 35) return 'Easy-Intermediate';
+  if (levelNumber <= 50) return 'Intermediate';
+  if (levelNumber <= 65) return 'Intermediate-Advanced';
+  if (levelNumber <= 80) return 'Advanced';
+  if (levelNumber <= 90) return 'Very Advanced';
+  return 'Expert';
+}
+
 export function getGameModeLevelData(
   modeId: GameModeId,
   levelNumber: number
 ): GameModeLevelData {
   const stage = getStageForLevel(levelNumber);
   const stageMeta = ALL_CHAMPIONSHIP_STAGES.find((s) => s.id === stage) || ALL_CHAMPIONSHIP_STAGES[0];
-  const difficulty: GameDifficulty =
-    stageMeta.stageNumber <= 2
-      ? 'Beginner'
-      : stageMeta.stageNumber <= 4
-      ? 'Intermediate'
-      : stageMeta.stageNumber <= 7
-      ? 'Advanced'
-      : stageMeta.stageNumber <= 9
-      ? 'Expert'
-      : 'Master';
+  const difficulty: GameDifficulty = getGradualDifficulty(levelNumber);
 
   // 1. Bible Trivia: Leverage the 2,000 authentic championship questions directly
   if (modeId === 'trivia') {

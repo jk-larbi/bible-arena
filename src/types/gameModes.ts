@@ -1,4 +1,13 @@
-export type GameDifficulty = 'Beginner' | 'Intermediate' | 'Advanced' | 'Expert' | 'Master';
+export type GameDifficulty =
+  | 'Beginner'
+  | 'Easy'
+  | 'Easy-Intermediate'
+  | 'Intermediate'
+  | 'Intermediate-Advanced'
+  | 'Advanced'
+  | 'Very Advanced'
+  | 'Expert'
+  | 'Master';
 
 export type GameModeId =
   | 'trivia'

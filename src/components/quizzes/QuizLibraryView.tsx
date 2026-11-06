@@ -17,11 +17,14 @@ import {
   Play,
   PlusCircle,
   Layers,
+  Users,
+  Sparkles,
 } from 'lucide-react';
 import { curriculumDataService } from '../../data/curriculum/curriculumDataService';
 import { curriculumProgressionService } from '../../services/curriculumProgressionService';
 import { CurriculumStageRoadmap } from '../curriculum/CurriculumStageRoadmap';
 import { CurriculumLevelRunner } from '../curriculum/CurriculumLevelRunner';
+import { BibleCharacterHub } from '../characters/BibleCharacterHub';
 
 interface QuizLibraryViewProps {
   onPlayQuiz: (quizId: string) => void;
@@ -29,7 +32,7 @@ interface QuizLibraryViewProps {
   onGameplayStateChange?: (isActive: boolean) => void;
 }
 
-type DiscoverViewMode = 'library' | 'roadmap' | 'runner';
+type DiscoverViewMode = 'library' | 'roadmap' | 'runner' | 'characters';
 
 export const QuizLibraryView: React.FC<QuizLibraryViewProps> = ({
   onPlayQuiz,
@@ -223,10 +226,24 @@ export const QuizLibraryView: React.FC<QuizLibraryViewProps> = ({
   }
 
   // --------------------------------------------------------------------------
-  // VIEW MODE 3: DISCOVER CURRICULUM & QUIZ LIBRARY (DEFAULT)
+  // VIEW MODE 3: BIBLE CHARACTERS & 20 QUALITIES HUB
+  // --------------------------------------------------------------------------
+  if (viewMode === 'characters') {
+    return (
+      <BibleCharacterHub
+        onBack={() => {
+          setViewMode('library');
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
+      />
+    );
+  }
+
+  // --------------------------------------------------------------------------
+  // VIEW MODE 4: DISCOVER CURRICULUM & QUIZ LIBRARY (DEFAULT)
   // --------------------------------------------------------------------------
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-10 animate-fade-in text-[#0F172A]">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8 animate-fade-in text-[#0F172A]">
       {/* Header Banner */}
       <div className="bg-gradient-to-r from-[#1E1B4B] via-[#4338CA] to-[#2563EB] text-white rounded-3xl p-6 sm:p-10 shadow-xl border border-indigo-400/30 flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div className="space-y-3 max-w-2xl">
@@ -237,18 +254,60 @@ export const QuizLibraryView: React.FC<QuizLibraryViewProps> = ({
             Discover Bible Curriculums
           </h1>
           <p className="text-xs sm:text-sm text-indigo-100 leading-relaxed font-medium font-inter">
-            Master in-depth Bible learning across 7 comprehensive curriculum topics. Each topic features <strong>100 playable levels</strong> with <strong>20 questions per level</strong> (2,000 verified questions per curriculum • 14,000 total questions). Track your completed levels, earn stars, and master the Scriptures at your own pace.
+            Master in-depth Bible learning across 7 comprehensive curriculum topics. Each topic features <strong>100 playable levels</strong> with verified unique questions (<strong>900 verified unique questions per curriculum</strong> • Goal: 2,000 questions per topic). Track your completed levels, earn stars, and master the Scriptures at your own pace.
           </p>
+        </div>
+
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 shrink-0">
+          <Button
+            variant="outline"
+            size="lg"
+            onClick={() => setViewMode('characters')}
+            leftIcon={<Users className="w-5 h-5 text-amber-300" />}
+            className="font-black bg-white/10 hover:bg-white/20 text-white border-white/30 backdrop-blur-sm cursor-pointer shadow-md"
+          >
+            Bible Characters & Qualities
+          </Button>
+
+          <Button
+            variant="gold"
+            size="lg"
+            onClick={onCreateQuiz}
+            leftIcon={<PlusCircle className="w-5 h-5" />}
+            className="font-black shadow-lg cursor-pointer"
+          >
+            Create a Quiz
+          </Button>
+        </div>
+      </div>
+
+      {/* Featured Entry to Bible Characters & 20 Biblical Qualities */}
+      <div className="bg-gradient-to-r from-amber-50 via-purple-50 to-blue-50 border-2 border-purple-200/60 rounded-3xl p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div className="flex items-start gap-4">
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[#7C3AED] to-[#2563EB] text-white flex items-center justify-center shrink-0 shadow-md">
+            <Users className="w-7 h-7" />
+          </div>
+          <div className="space-y-1">
+            <div className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full bg-purple-100 text-[#7C3AED] text-[11px] font-black uppercase tracking-wider">
+              <Sparkles className="w-3.5 h-3.5 text-amber-500" /> New Interactive Study Hub
+            </div>
+            <h3 className="text-lg sm:text-xl font-black text-[#0F172A]">
+              55 Bible Characters & 20 Biblical Qualities
+            </h3>
+            <p className="text-xs sm:text-sm text-[#475569] max-w-2xl leading-relaxed">
+              Explore 32 Old Testament and 23 New Testament heroes, each with 10 pedagogical fields (background, accomplishments, mistakes, growth, life lessons & key verses), plus deep study of the 20 Biblical Qualities with practice quizzes.
+            </p>
+          </div>
         </div>
 
         <Button
           variant="gold"
-          size="lg"
-          onClick={onCreateQuiz}
-          leftIcon={<PlusCircle className="w-5 h-5" />}
-          className="self-start md:self-auto shrink-0 font-black shadow-lg cursor-pointer"
+          size="md"
+          onClick={() => setViewMode('characters')}
+          leftIcon={<Sparkles className="w-4 h-4 fill-current" />}
+          className="self-start md:self-auto shrink-0 font-black shadow-md cursor-pointer"
         >
-          Create a Quiz
+          Explore Characters (55)
         </Button>
       </div>
 
@@ -291,7 +350,7 @@ export const QuizLibraryView: React.FC<QuizLibraryViewProps> = ({
                     {cat.symbol}
                   </span>
                   <span className="text-[11px] font-bold text-slate-500 font-outfit">
-                    {cat.id === 'Old Testament' || cat.id === 'New Testament' ? '2,000 Qs' : `${count} Track`}
+                    {cat.id === 'Old Testament' || cat.id === 'New Testament' ? '900 Qs' : `${count} Track`}
                   </span>
                 </div>
 

@@ -95,7 +95,7 @@ export const CurriculumStageRoadmap: React.FC<CurriculumStageRoadmapProps> = ({
       <div className="relative rounded-3xl overflow-hidden bg-gradient-to-br from-[#1E1B4B] via-[#312E81] to-[#4338CA] text-white p-6 sm:p-10 shadow-xl border border-indigo-400/30">
         <div className="relative z-10 max-w-3xl space-y-4">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-400/20 text-amber-300 border border-amber-400/40 text-xs font-black tracking-wide uppercase">
-            <BookOpen className="w-3.5 h-3.5" /> 100 Playable Levels • 2,000 Questions
+            <BookOpen className="w-3.5 h-3.5" /> 100 Playable Levels • {topic.verifiedUniqueQuestions.toLocaleString()} Verified Unique Qs (Goal: {topic.targetQuestions.toLocaleString()})
           </div>
 
           <h1 className="text-2xl sm:text-4xl lg:text-5xl font-black font-outfit tracking-tight text-white leading-tight">
@@ -116,9 +116,12 @@ export const CurriculumStageRoadmap: React.FC<CurriculumStageRoadmapProps> = ({
             </div>
 
             <div className="bg-white/10 backdrop-blur-md p-3 rounded-2xl border border-white/10">
-              <span className="text-[10px] text-indigo-200 font-bold uppercase tracking-wider block">Total Questions</span>
+              <span className="text-[10px] text-indigo-200 font-bold uppercase tracking-wider block">Verified Unique</span>
               <span className="text-xl sm:text-2xl font-black text-amber-300">
-                2,000 <span className="text-xs text-amber-200 font-medium">Verified</span>
+                {topic.verifiedUniqueQuestions.toLocaleString()} <span className="text-xs text-amber-200 font-medium">Verified</span>
+              </span>
+              <span className="text-[10px] text-indigo-300 block font-normal mt-0.5">
+                Goal: {topic.targetQuestions.toLocaleString()} • Gap: {topic.contentGap.toLocaleString()}
               </span>
             </div>
 
@@ -150,7 +153,7 @@ export const CurriculumStageRoadmap: React.FC<CurriculumStageRoadmapProps> = ({
             </Button>
 
             <span className="text-xs text-indigo-200 font-medium">
-              Passing requirement: 70% (14 / 20 correct) to unlock the next level
+              Passing requirement: 70% to unlock the next level
             </span>
           </div>
         </div>
@@ -233,7 +236,7 @@ export const CurriculumStageRoadmap: React.FC<CurriculumStageRoadmapProps> = ({
           <h2 className="text-base font-black text-[#0F172A] font-outfit flex items-center gap-2">
             <span>{activeStage.stageName}</span>
             <span className="text-xs px-2.5 py-0.5 rounded-full bg-white font-bold text-slate-600 border border-slate-200">
-              Levels {activeStage.levelRange[0]}–{activeStage.levelRange[1]} • 20 Questions / Level
+              Levels {activeStage.levelRange[0]}–{activeStage.levelRange[1]} • {topic.uniqueQuestionsPerLevel} Unique Qs / Level
             </span>
           </h2>
           <p className="text-xs text-slate-600 font-inter mt-0.5">{activeStage.description}</p>
@@ -310,10 +313,10 @@ export const CurriculumStageRoadmap: React.FC<CurriculumStageRoadmapProps> = ({
 
                 {/* Question Info & Score */}
                 <div className="flex items-center justify-between text-xs font-bold text-slate-500 font-outfit pt-2 border-t border-slate-100">
-                  <span>20 Questions</span>
+                  <span>{lvlData.questions.length} Unique Questions</span>
                   {isCompleted && (
                     <span className="text-emerald-700 font-black">
-                      Best: {prog.bestScore}/20 ({prog.percentage}%)
+                      Best: {prog.bestScore}/{lvlData.questions.length} ({prog.percentage}%)
                     </span>
                   )}
                 </div>

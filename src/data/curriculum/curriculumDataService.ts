@@ -9,6 +9,7 @@ import type {
   CurriculumDifficulty,
 } from '../../types/curriculum';
 import { ALL_CURRICULA_METADATA } from './curriculumRegistry';
+import { questionUniquenessService } from '../../services/questionUniquenessService';
 
 // Lazy level loaders for minimal browser memory footprint
 import { getGENESIS_CURRICULUMLevel } from './genesisCurriculum';
@@ -84,33 +85,49 @@ export const curriculumDataService = {
 
   getCurriculumLevelData(curriculumId: string, levelNumber: number): CurriculumLevelData {
     const safeLevel = Math.max(1, Math.min(100, levelNumber));
+    let rawLevel: CurriculumLevelData;
 
     switch (curriculumId) {
       case 'quiz-genesis-beginnings':
-        return getGENESIS_CURRICULUMLevel(safeLevel);
+        rawLevel = getGENESIS_CURRICULUMLevel(safeLevel);
+        break;
 
       case 'quiz-gospels-life-of-christ':
-        return getGOSPELS_CURRICULUMLevel(safeLevel);
+        rawLevel = getGOSPELS_CURRICULUMLevel(safeLevel);
+        break;
 
       case 'quiz-acts-early-church':
-        return getACTS_CURRICULUMLevel(safeLevel);
+        rawLevel = getACTS_CURRICULUMLevel(safeLevel);
+        break;
 
       case 'quiz-heroes-of-faith':
-        return getHEROES_CURRICULUMLevel(safeLevel);
+        rawLevel = getHEROES_CURRICULUMLevel(safeLevel);
+        break;
 
       case 'quiz-christian-living-discipleship':
-        return getCHRISTIAN_LIVING_CURRICULUMLevel(safeLevel);
+        rawLevel = getCHRISTIAN_LIVING_CURRICULUMLevel(safeLevel);
+        break;
 
       case 'quiz-scripture-memory-challenge':
-        return getSCRIPTURE_MEMORY_CURRICULUMLevel(safeLevel);
+        rawLevel = getSCRIPTURE_MEMORY_CURRICULUMLevel(safeLevel);
+        break;
 
       case 'quiz-kings-exile-temple':
-        return getKINGS_PROPHETS_CURRICULUMLevel(safeLevel);
+        rawLevel = getKINGS_PROPHETS_CURRICULUMLevel(safeLevel);
+        break;
 
       default:
-        // Default fallback to Genesis
-        return getGENESIS_CURRICULUMLevel(safeLevel);
+        rawLevel = getGENESIS_CURRICULUMLevel(safeLevel);
+        break;
     }
+
+    // Strictly deduplicate questions within the level to ensure 100% genuine uniqueness
+    const { unique } = questionUniquenessService.deduplicateQuestions(rawLevel.questions, 0.82);
+
+    return {
+      ...rawLevel,
+      questions: unique,
+    };
   },
 
   getStageForLevel(levelNumber: number): CurriculumStageGroup {

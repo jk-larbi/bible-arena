@@ -65,8 +65,12 @@ export interface CurriculumTopicMeta {
   category: string;
   difficulty: CurriculumDifficulty;
   totalLevels: number; // 100
-  questionsPerLevel: number; // 20
-  totalQuestions: number; // 2,000
+  questionsPerLevel: number; // Max slot capacity (20)
+  uniqueQuestionsPerLevel: number; // Verified genuine unique questions per level (9)
+  totalQuestions: number; // Total slot count (2,000)
+  verifiedUniqueQuestions: number; // Verified unique question count (900)
+  targetQuestions: number; // Curriculum completion goal (2,000)
+  contentGap: number; // Remaining unique questions needed to hit 2,000 (1,100)
   estimatedMinutesPerLevel: number; // e.g. 10 mins
   coverImage: string;
   authorName: string;

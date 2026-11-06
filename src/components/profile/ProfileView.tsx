@@ -21,7 +21,15 @@ import {
   Star,
   Lock,
   Edit3,
+  Bell,
+  Clock,
+  ShieldCheck,
 } from 'lucide-react';
+import {
+  playerNotificationService,
+  type UserNotificationPreferences,
+  type ReminderNotificationMessage,
+} from '../../services/playerNotificationService';
 
 interface ProfileViewProps {
   onExploreQuizzes: () => void;
@@ -31,8 +39,19 @@ interface ProfileViewProps {
 export const ProfileView: React.FC<ProfileViewProps> = ({ onExploreQuizzes, onHostArena }) => {
   const { currentUser, userAttempts, saveAvatar, updateProfile } = useAuth();
 
-  // Tab State: 'overview' or 'avatar-customizer'
-  const [activeTab, setActiveTab] = useState<'overview' | 'avatar-customizer'>('overview');
+  // Tab State: 'overview', 'avatar-customizer', or 'reminders'
+  const [activeTab, setActiveTab] = useState<'overview' | 'avatar-customizer' | 'reminders'>('overview');
+
+  // Reminders & Notifications State
+  const [reminderPrefs, setReminderPrefs] = useState<UserNotificationPreferences>(() =>
+    playerNotificationService.getPreferences(currentUser.id)
+  );
+  const [reminderFeedback, setReminderFeedback] = useState<{
+    type: 'success' | 'error' | 'info';
+    message: string;
+  } | null>(null);
+  const [isRequestingPermission, setIsRequestingPermission] = useState(false);
+  const [inAppPreviewMsg, setInAppPreviewMsg] = useState<ReminderNotificationMessage | null>(null);
 
   // Avatar Gallery State
   const [selectedAvatarId, setSelectedAvatarId] = useState<string>(currentUser.avatar || 'hero-david');
@@ -101,6 +120,88 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onExploreQuizzes, onHo
     if (!nicknameInput.trim()) return;
     await updateProfile({ nickname: nicknameInput.trim(), name: nicknameInput.trim() });
     setIsEditNicknameOpen(false);
+  };
+
+  const handleRequestBrowserPermission = async () => {
+    setIsRequestingPermission(true);
+    const perm = await playerNotificationService.requestPermission(currentUser.id);
+    setIsRequestingPermission(false);
+    const updated = playerNotificationService.getPreferences(currentUser.id);
+    setReminderPrefs(updated);
+    if (perm === 'granted') {
+      setReminderFeedback({
+        type: 'success',
+        message: 'Browser notification permission granted! Reminders will arrive smoothly.',
+      });
+    } else {
+      setReminderFeedback({
+        type: 'info',
+        message: 'Browser notifications are not enabled. In-app alerts will be used instead.',
+      });
+    }
+  };
+
+  const handleToggleReminders = (enabled: boolean) => {
+    const updated: UserNotificationPreferences = {
+      ...reminderPrefs,
+      enabled,
+    };
+    playerNotificationService.savePreferences(updated);
+    setReminderPrefs(updated);
+    setReminderFeedback({
+      type: 'success',
+      message: enabled
+        ? `Reminders enabled! You will be reminded every ${updated.intervalHours} hours outside quiet hours.`
+        : 'Reminders disabled. No gameplay notifications will be sent.',
+    });
+  };
+
+  const handleUpdateInterval = (hours: number) => {
+    const updated: UserNotificationPreferences = {
+      ...reminderPrefs,
+      intervalHours: hours,
+    };
+    playerNotificationService.savePreferences(updated);
+    setReminderPrefs(updated);
+    setReminderFeedback({
+      type: 'success',
+      message: `Interval updated: you'll be reminded every ${hours} hours.`,
+    });
+  };
+
+  const handleUpdateQuietHours = (start: string, end: string) => {
+    const updated: UserNotificationPreferences = {
+      ...reminderPrefs,
+      quietHoursStart: start,
+      quietHoursEnd: end,
+    };
+    playerNotificationService.savePreferences(updated);
+    setReminderPrefs(updated);
+    setReminderFeedback({
+      type: 'success',
+      message: `Quiet hours saved: ${start} to ${end}. No reminders will sound during this time.`,
+    });
+  };
+
+  const handleTriggerTestReminder = () => {
+    const result = playerNotificationService.checkAndTriggerReminder(
+      currentUser.id,
+      (msg) => {
+        setInAppPreviewMsg(msg);
+      }
+    );
+
+    if (result.triggered) {
+      setReminderFeedback({
+        type: 'success',
+        message: `Test reminder dispatched: "${result.message?.title}"`,
+      });
+    } else {
+      setReminderFeedback({
+        type: 'info',
+        message: `Reminder not triggered: ${result.reason}`,
+      });
+    }
   };
 
   const getBadgeIcon = (icon: string) => {
@@ -248,6 +349,50 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onExploreQuizzes, onHo
       </div>
 
       {/* ------------------------------------------------------------------ */}
+      {/* PROFILE NAVIGATION TABS                                            */}
+      {/* ------------------------------------------------------------------ */}
+      <div className="flex flex-wrap items-center gap-2 border-b border-[#E2E8F0] pb-2">
+        <button
+          onClick={() => setActiveTab('overview')}
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all cursor-pointer ${
+            activeTab === 'overview'
+              ? 'bg-[#7C3AED] text-white shadow-md shadow-[#7C3AED]/20'
+              : 'bg-white text-[#64748B] hover:text-[#0F172A] hover:bg-[#F1F5F9] border border-[#E2E8F0]'
+          }`}
+        >
+          <Trophy className="w-4 h-4" />
+          <span>Player Overview</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('avatar-customizer')}
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all cursor-pointer ${
+            activeTab === 'avatar-customizer'
+              ? 'bg-[#7C3AED] text-white shadow-md shadow-[#7C3AED]/20'
+              : 'bg-white text-[#64748B] hover:text-[#0F172A] hover:bg-[#F1F5F9] border border-[#E2E8F0]'
+          }`}
+        >
+          <Palette className="w-4 h-4" />
+          <span>Faith Avatars</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('reminders')}
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-2xl text-xs sm:text-sm font-black transition-all cursor-pointer relative ${
+            activeTab === 'reminders'
+              ? 'bg-[#7C3AED] text-white shadow-md shadow-[#7C3AED]/20'
+              : 'bg-white text-[#64748B] hover:text-[#0F172A] hover:bg-[#F1F5F9] border border-[#E2E8F0]'
+          }`}
+        >
+          <Bell className="w-4 h-4" />
+          <span>Study Reminders & Alerts</span>
+          {reminderPrefs.enabled && (
+            <span className="w-2 h-2 rounded-full bg-emerald-400 ring-2 ring-white" />
+          )}
+        </button>
+      </div>
+
+      {/* ------------------------------------------------------------------ */}
       {/* 2. AVATAR CUSTOMIZER GALLERY TAB (Accessible right from Profile)   */}
       {/* ------------------------------------------------------------------ */}
       {activeTab === 'avatar-customizer' && (
@@ -389,9 +534,11 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onExploreQuizzes, onHo
       )}
 
       {/* ------------------------------------------------------------------ */}
-      {/* 3. FOUR CORE PLAYER METRICS (Actual Data)                          */}
+      {/* 3. FOUR CORE PLAYER METRICS & OVERVIEW TAB                         */}
       {/* ------------------------------------------------------------------ */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      {activeTab === 'overview' && (
+        <div className="space-y-8 animate-scale-in">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         {/* Total Points */}
         <div className="bg-white rounded-2xl border border-[#E2E8F0] p-5 shadow-xs text-center">
           <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto mb-2 border border-amber-100">
@@ -626,6 +773,258 @@ export const ProfileView: React.FC<ProfileViewProps> = ({ onExploreQuizzes, onHo
           </div>
         )}
       </div>
+      </div>
+      )}
+
+      {/* ------------------------------------------------------------------ */}
+      {/* 7. REMINDERS & NOTIFICATIONS TAB                                   */}
+      {/* ------------------------------------------------------------------ */}
+      {activeTab === 'reminders' && (
+        <div className="bg-white rounded-3xl border border-[#E2E8F0] p-6 sm:p-8 shadow-sm space-y-8 animate-scale-in">
+          {/* Header */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#F1F5F9]">
+            <div>
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#7C3AED]/10 text-[#7C3AED] text-xs font-black uppercase tracking-wider mb-1">
+                <Bell className="w-3.5 h-3.5" /> Gameplay Notifications
+              </div>
+              <h2 className="text-xl sm:text-2xl font-black text-[#0F172A]">
+                Study Reminders & Alerts
+              </h2>
+              <p className="text-xs sm:text-sm text-[#64748B]">
+                Stay consistent in your Scripture learning. Set gentle reminders that respect your quiet hours and active playing time.
+              </p>
+            </div>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setActiveTab('overview')}
+              className="self-start sm:self-auto font-bold"
+            >
+              Back to Overview
+            </Button>
+          </div>
+
+          {/* Feedback banner */}
+          {reminderFeedback && (
+            <div
+              className={`p-4 rounded-2xl text-xs sm:text-sm font-bold flex items-center justify-between gap-3 ${
+                reminderFeedback.type === 'success'
+                  ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                  : reminderFeedback.type === 'error'
+                  ? 'bg-red-50 text-red-800 border border-red-200'
+                  : 'bg-blue-50 text-blue-800 border border-blue-200'
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span>{reminderFeedback.message}</span>
+              </div>
+              <button
+                onClick={() => setReminderFeedback(null)}
+                className="text-xs opacity-60 hover:opacity-100 font-black cursor-pointer"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
+          {/* In-app reminder preview if triggered */}
+          {inAppPreviewMsg && (
+            <div className="p-5 rounded-2xl bg-gradient-to-r from-[#EDE9FE] to-[#DBEAFE] border-2 border-[#7C3AED]/30 shadow-md space-y-2 animate-scale-in">
+              <div className="flex items-center justify-between">
+                <span className="inline-flex items-center gap-1.5 text-xs font-black uppercase tracking-wider text-[#7C3AED]">
+                  <Sparkles className="w-4 h-4 text-amber-500" /> In-App Notification Preview
+                </span>
+                <button
+                  onClick={() => setInAppPreviewMsg(null)}
+                  className="text-xs font-bold text-[#64748B] hover:text-[#0F172A]"
+                >
+                  Close
+                </button>
+              </div>
+              <h4 className="text-base font-black text-[#0F172A]">{inAppPreviewMsg.title}</h4>
+              <p className="text-xs sm:text-sm text-[#475569]">{inAppPreviewMsg.body}</p>
+            </div>
+          )}
+
+          {/* Setting 1: Master Enable Switch & Browser Permission */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="p-6 rounded-2xl border-2 border-[#E2E8F0] bg-[#F8FAFC] space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-[#7C3AED]/10 text-[#7C3AED] flex items-center justify-center">
+                    <Bell className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-black text-sm text-[#0F172A]">Gameplay Reminders</h3>
+                    <p className="text-xs text-[#64748B]">Gentle alerts to play and learn</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => handleToggleReminders(!reminderPrefs.enabled)}
+                  className={`w-14 h-8 flex items-center rounded-full p-1 cursor-pointer transition-colors ${
+                    reminderPrefs.enabled ? 'bg-emerald-500 justify-end' : 'bg-[#CBD5E1] justify-start'
+                  }`}
+                >
+                  <span className="w-6 h-6 rounded-full bg-white shadow-md transform transition-transform" />
+                </button>
+              </div>
+              <p className="text-xs text-[#475569] leading-relaxed">
+                When enabled, BibleArena sends you friendly reminders to jump back in when you have been away for {reminderPrefs.intervalHours} hours.
+              </p>
+            </div>
+
+            <div className="p-6 rounded-2xl border-2 border-[#E2E8F0] bg-[#F8FAFC] space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+                    <ShieldCheck className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-black text-sm text-[#0F172A]">Browser Push Permission</h3>
+                    <p className="text-xs text-[#64748B]">Deliver even when tab is backgrounded</p>
+                  </div>
+                </div>
+                <span
+                  className={`px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${
+                    reminderPrefs.permissionStatus === 'granted'
+                      ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                      : reminderPrefs.permissionStatus === 'denied'
+                      ? 'bg-red-100 text-red-800 border border-red-300'
+                      : 'bg-amber-100 text-amber-800 border border-amber-300'
+                  }`}
+                >
+                  {reminderPrefs.permissionStatus === 'granted'
+                    ? 'Granted'
+                    : reminderPrefs.permissionStatus === 'denied'
+                    ? 'Blocked'
+                    : 'Not Requested'}
+                </span>
+              </div>
+              {reminderPrefs.permissionStatus !== 'granted' ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRequestBrowserPermission}
+                  disabled={isRequestingPermission}
+                  fullWidth
+                  className="font-bold text-xs"
+                >
+                  {isRequestingPermission ? 'Requesting...' : 'Request Browser Permission'}
+                </Button>
+              ) : (
+                <p className="text-xs text-emerald-700 font-semibold flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4" /> Browser push notifications are active on this device.
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Setting 2: Interval Selector (Default: 5 Hours) */}
+          <div className="p-6 rounded-2xl border border-[#E2E8F0] bg-white space-y-4">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <Clock className="w-4 h-4 text-[#7C3AED]" />
+                <h3 className="font-black text-sm text-[#0F172A]">Reminder Frequency</h3>
+              </div>
+              <p className="text-xs text-[#64748B]">
+                Standard default is 5 hours. Reminders will only fire when you have been away from BibleArena for this duration.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+              {[
+                { hours: 2, label: 'Every 2 Hours', tag: 'Fast Review' },
+                { hours: 4, label: 'Every 4 Hours', tag: 'Regular' },
+                { hours: 5, label: 'Every 5 Hours', tag: 'Default • Recommended' },
+                { hours: 8, label: 'Every 8 Hours', tag: 'Twice a Day' },
+                { hours: 12, label: 'Every 12 Hours', tag: 'Daily Review' },
+              ].map((opt) => {
+                const isSelected = reminderPrefs.intervalHours === opt.hours;
+                return (
+                  <button
+                    key={opt.hours}
+                    onClick={() => handleUpdateInterval(opt.hours)}
+                    className={`p-3 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center justify-center gap-1 ${
+                      isSelected
+                        ? 'border-[#7C3AED] bg-[#EDE9FE]/50 ring-2 ring-[#7C3AED]/20'
+                        : 'border-[#E2E8F0] hover:border-[#CBD5E1] bg-[#F8FAFC]'
+                    }`}
+                  >
+                    <span className="text-xs font-black text-[#0F172A]">{opt.label}</span>
+                    <span className={`text-[10px] font-bold ${isSelected ? 'text-[#7C3AED]' : 'text-[#64748B]'}`}>
+                      {opt.tag}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Setting 3: Quiet Hours (e.g. 10:00 PM - 8:00 AM) */}
+          <div className="p-6 rounded-2xl border border-[#E2E8F0] bg-white space-y-4">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <Lock className="w-4 h-4 text-indigo-600" />
+                <h3 className="font-black text-sm text-[#0F172A]">Quiet Hours (Rest & Sleep Protection)</h3>
+              </div>
+              <p className="text-xs text-[#64748B]">
+                Notifications are strictly silenced during your quiet hours, even if an interval has elapsed.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 max-w-lg">
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-[#475569] mb-1">
+                  Quiet Hours Start (Evening)
+                </label>
+                <input
+                  type="time"
+                  value={reminderPrefs.quietHoursStart}
+                  onChange={(e) => handleUpdateQuietHours(e.target.value, reminderPrefs.quietHoursEnd)}
+                  className="w-full px-3 py-2 rounded-xl border border-[#CBD5E1] text-xs font-bold text-[#0F172A]"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-[#475569] mb-1">
+                  Quiet Hours End (Morning)
+                </label>
+                <input
+                  type="time"
+                  value={reminderPrefs.quietHoursEnd}
+                  onChange={(e) => handleUpdateQuietHours(reminderPrefs.quietHoursStart, e.target.value)}
+                  className="w-full px-3 py-2 rounded-xl border border-[#CBD5E1] text-xs font-bold text-[#0F172A]"
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Setting 4: Smart Anti-Spam Safeguards & Test Trigger */}
+          <div className="p-6 rounded-2xl border border-[#E2E8F0] bg-[#F8FAFC] flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div className="space-y-1 max-w-xl">
+              <h4 className="font-black text-xs uppercase tracking-wider text-[#7C3AED]">
+                Smart Gameplay Safeguards
+              </h4>
+              <ul className="text-xs text-[#475569] space-y-1 list-disc list-inside">
+                <li>Never sends while playing: suppressed if active within the last 15 minutes.</li>
+                <li>Varied natural copy: changes between character highlights, daily scripture, and quiz rounds.</li>
+                <li>No duplicate alerts: consecutive unread notifications are automatically throttled.</li>
+              </ul>
+            </div>
+
+            <Button
+              variant="gold"
+              size="sm"
+              onClick={handleTriggerTestReminder}
+              leftIcon={<Bell className="w-4 h-4" />}
+              className="font-black text-xs shrink-0 shadow-xs cursor-pointer"
+            >
+              Test Gameplay Reminder
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Nickname Edit Modal */}
       {isEditNicknameOpen && (

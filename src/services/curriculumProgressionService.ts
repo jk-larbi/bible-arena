@@ -41,10 +41,11 @@ export function getInitialCurriculumProgress(curriculumId: string): CurriculumPr
   };
 }
 
-export function calculateCurriculumStars(score: number): number {
-  if (score >= 20) return 3; // 100%
-  if (score >= 17) return 2; // >=85%
-  if (score >= 14) return 1; // >=70%
+export function calculateCurriculumStars(score: number, totalQuestions: number = QUESTIONS_PER_LEVEL): number {
+  const percentage = Math.round((score / Math.max(1, totalQuestions)) * 100);
+  if (percentage >= 100) return 3; // 100%
+  if (percentage >= 85) return 2; // >=85%
+  if (percentage >= 70) return 1; // >=70%
   return 0;
 }
 
@@ -158,9 +159,9 @@ export const curriculumProgressionService = {
       attemptsCount: 0,
     };
 
-    const percentage = Math.round((params.score / params.totalQuestions) * 100);
+    const percentage = Math.round((params.score / Math.max(1, params.totalQuestions)) * 100);
     const passed = percentage >= PASSING_PERCENTAGE;
-    const stars = calculateCurriculumStars(params.score);
+    const stars = calculateCurriculumStars(params.score, params.totalQuestions);
 
     progress.attemptsCount += 1;
     if (params.score > progress.bestScore) {
